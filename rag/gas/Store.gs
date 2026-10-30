@@ -20,7 +20,8 @@ function sh_(key) {
 function rows_(key) {
   const v = sh_(key).getDataRange().getValues();
   const head = v.shift() || [];
-  return v.filter(r => r.some(c => c !== '')).map((r, i) => { const o = { _row: i + 2 }; head.forEach((h, j) => o[h] = r[j]); return o; });
+  // 先記下真正的列號再過濾空白列，之後依 _row 更新才不會改錯列
+  return v.map((r, i) => { const o = { _row: i + 2 }; head.forEach((h, j) => o[h] = r[j]); o._empty = !r.some(c => c !== ''); return o; }).filter(o => !o._empty);
 }
 function append_(key, arr) { const s = sh_(key); s.getRange(s.getLastRow() + 1, 1, arr.length, arr[0].length).setValues(arr); }
 function truthy_(v) { return v === true || String(v).toUpperCase() === 'TRUE' || v === '是'; }

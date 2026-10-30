@@ -49,7 +49,7 @@ function runChat_(req, opts) {
   const refTable = referral_();
   const exp = expandQuery_(caseText);
   const [triRes, embRes] = UrlFetchApp.fetchAll([
-    genReq_(C.model_triage, [{ text: triagePrompt_(caseText, topics, Object.keys(refTable)) }], { json: true, temperature: 0 }),
+    genReq_(C.model_triage, [{ text: triagePrompt_(caseText, topics, Object.keys(refTable)) }], { json: true, temperature: 0, noThink: true }),
     embedReqs_([exp.text], 'RETRIEVAL_QUERY')[0],
   ]);
   const tri = parseJson_(genText_(triRes));
@@ -85,7 +85,7 @@ function runChat_(req, opts) {
     T('P04 狀態機', '資訊不足 → 追問');
     T('P05 Skill 載入', pick.map(s => s.name).join('、'));
     const fu = genJson_(C.model_answer, sysPrompt + '\n\n' + skillText + '\n\n老師的描述資訊不足，缺少：' + (tri.missing || []).join('、') +
-      '。請先用一句話同理老師，再依 Skill 的追問清單提出最多 2 個最關鍵、好回答的追問。只輸出 JSON：{"empathy":"","questions":["",""]}\n\n老師的描述：\n' + caseText, { temperature: 0.4 });
+      '。請先用一句話同理老師，再依 Skill 的追問清單提出最多 2 個最關鍵、好回答的追問。只輸出 JSON：{"empathy":"","questions":["",""]}\n\n老師的描述：\n' + caseText, { temperature: 0.4, noThink: true });
     T('A1 追問', fu);
     return finish({ type: 'followup', empathy: fu.empathy || '', questions: (fu.questions || []).slice(0, 2) });
   }
@@ -125,6 +125,7 @@ function runChat_(req, opts) {
 }
 
 function assemble_(sys, skillText, tri, caseText, hits, history, ref, refWho, feedback) {
+  const forbiddenWords = forbidden_().filter(f => !f.regex).map(f => f.rule);
   const hist = history.map(h => (h.role === 'teacher' ? '老師：' : '助手：') + h.text).join('\n');
   const kn = hits.map(h => h.ref + '｜' + h.title + (h.page ? '（第' + h.page + '頁）' : '') + '\n' + h.text).join('\n\n');
   return [
@@ -136,7 +137,8 @@ function assemble_(sys, skillText, tri, caseText, hits, history, ref, refWho, fe
     feedback ? '【重寫指示】上一版沒有通過檢查：' + feedback.join('；') + '。請修正後重寫。' : '',
     '輸出格式（只輸出 JSON）：{"empathy":"先回應老師感受的一兩句","understanding":"看見與理解：把行為轉成可觀察事件，推想背後的需要（兩三句）","strategies":[{"title":"策略名稱","how":"具體怎麼做（一兩句）","refs":["K1"]}],"parent_message":"若牽涉家長，給家長的訊息草稿，否則 null","observe":["接下來的觀察重點"],"teacher_care":"若老師提到壓力，一兩句自我照顧建議，否則 null","referral":' +
       (ref ? '"依「' + ref.level + '」說明為什麼需要、該找誰（可找：' + refWho + '）"' : 'null') + '}\n' +
-      '規則：strategies 2–3 個；每個策略的 refs 只能用上面提供的 K 編號，至少一個；不得推測診斷或使用標籤化用語；保留「幼兒A」等代稱。',
+      '規則：strategies 2–3 個；每個策略的 refs 只能用上面提供的 K 編號，至少一個；不得推測診斷或使用標籤化用語；保留「幼兒A」等代稱。' +
+      (forbiddenWords.length ? '回答中不得出現這些詞（即使是否定句也不要寫）：' + forbiddenWords.join('、') + '。' : ''),
   ].filter(Boolean).join('\n\n');
 }
 
@@ -156,7 +158,7 @@ function checks_(caseText, ans, hits, C) {
   if (truthy_(C.enable_llm_check)) {
     try {
       const kn = hits.map(h => h.ref + '：' + h.text).join('\n');
-      const l5 = genJson_(C.model_check, '你是學前融合教育 AI 回答的審查器，只輸出 JSON。檢查：(1) 每個策略是否有其引用的知識支撐，沒有自行編造；(2) 老師的描述中是否有應該轉介或找專人的訊號而回答遺漏；(3) 是否有說教或責怪老師、家長的語氣。\n格式：{"pass":true,"issues":[]}\n\n老師描述：\n' + caseText + '\n\n知識：\n' + kn + '\n\n回答：\n' + s, { temperature: 0 });
+      const l5 = genJson_(C.model_check, '你是學前融合教育 AI 回答的審查器，只輸出 JSON。檢查：(1) 每個策略是否有其引用的知識支撐，沒有自行編造；(2) 老師的描述中是否有應該轉介或找專人的訊號而回答遺漏；(3) 是否有說教或責怪老師、家長的語氣。\n格式：{"pass":true,"issues":[]}\n\n老師描述：\n' + caseText + '\n\n知識：\n' + kn + '\n\n回答：\n' + s, { temperature: 0, noThink: true });
       const pass = l5.pass !== false;
       items.push({ name: 'L5 依據與轉介', pass: pass, note: pass ? '有依據、無遺漏轉介' : (l5.issues || []).join('；') });
       if (!pass) reasons.push.apply(reasons, l5.issues || ['依據或轉介有問題']);

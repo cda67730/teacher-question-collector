@@ -14,6 +14,8 @@ function genReq_(model, parts, opts) {
   const body = { contents: [{ role: 'user', parts: parts }], generationConfig: { temperature: opts.temperature == null ? 0.3 : opts.temperature } };
   if (opts.json) body.generationConfig.responseMimeType = 'application/json';
   if (opts.maxTokens) body.generationConfig.maxOutputTokens = opts.maxTokens;
+  // 分流、檢查這類單一任務不需要模型「思考」，關掉可省下數秒（只對支援的 2.5 系列模型設定）
+  if (opts.noThink && /2\.5-flash/.test(model)) body.generationConfig.thinkingConfig = { thinkingBudget: 0 };
   return {
     url: GEMINI_BASE + model + ':generateContent', method: 'post', contentType: 'application/json',
     payload: JSON.stringify(body), headers: { 'x-goog-api-key': apiKey_() }, muteHttpExceptions: true,
@@ -65,8 +67,13 @@ function embedParse_(res) {
 }
 function embedTexts_(texts, taskType) {
   if (!texts.length) return [];
-  const out = [];
-  UrlFetchApp.fetchAll(embedReqs_(texts, taskType)).forEach(r => embedParse_(r).forEach(v => out.push(v)));
+  const reqs = embedReqs_(texts, taskType), out = [];
+  for (let i = 0; i < reqs.length; i += 3) {           // 一次最多 3 批，避免觸發頻率限制
+    const group = reqs.slice(i, i + 3);
+    let res = UrlFetchApp.fetchAll(group);
+    if (res.some(r => r.getResponseCode() === 429)) { Utilities.sleep(8000); res = UrlFetchApp.fetchAll(group); }
+    res.forEach(r => embedParse_(r).forEach(v => out.push(v)));
+  }
   return out;
 }
 

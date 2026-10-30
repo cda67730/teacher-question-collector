@@ -67,6 +67,7 @@ function setDocStatus_(docId, status, user) {
   // 同步段落狀態
   const cs = sh_('chunks'); const v = cs.getDataRange().getValues(); const ch = v[0];
   const di = ch.indexOf('文件ID'), si = ch.indexOf('狀態');
+  if (v.length < 2) return;
   for (let r = 1; r < v.length; r++) if (String(v[r][di]) === docId) v[r][si] = status;
   cs.getRange(2, si + 1, v.length - 1, 1).setValues(v.slice(1).map(r => [r[si]]));
 }
