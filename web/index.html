@@ -17,7 +17,7 @@
 
   <!-- 第 1 頁：邀請碼與同意 -->
   <section id="s-code" class="card">
-    <h2>請輸入邀請碼</h2>
+    <h2>開始之前</h2>
     <ul class="muted small">
       <li>說說你在班上遇到、希望有人一起想辦法的狀況，可以用說的，也可以打字。</li>
       <li>錄音只用來轉成文字，<b>轉完就刪除，不會保存</b>。</li>
@@ -25,6 +25,15 @@
     </ul>
     <label for="code">邀請碼</label>
     <input id="code" autocomplete="off" placeholder="請輸入園所提供的邀請碼">
+    <h3>關於你的班級</h3>
+    <div class="grid2">
+      <div><label for="city">園所所在縣市</label><select id="city"></select></div>
+      <div><label for="area">地區</label><select id="area"><option value="">請選擇</option><option>都會區</option><option>一般鄉鎮</option><option>偏鄉或離島</option></select></div>
+      <div><label for="years">教保年資</label><select id="years"><option value="">請選擇</option><option>未滿 2 年</option><option>2–5 年</option><option>6–10 年</option><option>11–20 年</option><option>20 年以上</option></select></div>
+      <div><label for="type">園所類型</label><select id="type"><option value="">請選擇</option><option>公立</option><option>非營利</option><option>準公共</option><option>私立</option></select></div>
+      <div><label for="cls">班級型態</label><select id="cls"><option value="">請選擇</option><option>幼幼班</option><option>小班</option><option>中班</option><option>大班</option><option>混齡班</option></select></div>
+    </div>
+    <label class="check"><input type="checkbox" id="sen"> 班上目前有特殊需求或疑似特殊需求的幼兒</label>
     <label class="check"><input type="checkbox" id="agree"> 我已了解上述說明，同意參與</label>
     <p class="err" id="e-code"></p>
     <button class="primary" id="b-code" type="button">下一步</button>
@@ -65,15 +74,6 @@
     <div id="reviewList" class="review-list"></div>
     <button class="ghost add" id="b-add" type="button">＋ 再新增一個問題</button>
 
-    <h3>關於你的班級</h3>
-    <div class="grid2">
-      <div><label for="city">園所所在縣市</label><select id="city"></select></div>
-      <div><label for="area">地區</label><select id="area"><option value="">請選擇</option><option>都會區</option><option>一般鄉鎮</option><option>偏鄉或離島</option></select></div>
-      <div><label for="years">教保年資</label><select id="years"><option value="">請選擇</option><option>未滿 2 年</option><option>2–5 年</option><option>6–10 年</option><option>11–20 年</option><option>20 年以上</option></select></div>
-      <div><label for="type">園所類型</label><select id="type"><option value="">請選擇</option><option>公立</option><option>非營利</option><option>準公共</option><option>私立</option></select></div>
-      <div><label for="cls">班級型態</label><select id="cls"><option value="">請選擇</option><option>幼幼班</option><option>小班</option><option>中班</option><option>大班</option><option>混齡班</option></select></div>
-    </div>
-    <label class="check"><input type="checkbox" id="sen"> 班上目前有特殊需求或疑似特殊需求的幼兒</label>
     <p class="err" id="e-review"></p>
     <button class="primary" id="b-submit" type="button">確認送出</button>
   </section>

@@ -7,7 +7,7 @@
   const ADD_HINT = "可以是任何帶班時遇到的事：孩子、家長、同事、環境都可以。";
 
   // items：每一題一筆；idx：目前那一題；returnToReview：從確認頁點「修改」進來的
-  const state = { code: "", items: [], idx: 0, returnToReview: false };
+  const state = { code: "", bg: null, items: [], idx: 0, returnToReview: false };
 
   const newItem = (q, extra) => ({
     qid: q.id, question: q.text, hint: q.hint || "", extra: !!extra,
@@ -22,7 +22,7 @@
     const step = id === "s-code" ? 0 : id === "s-q" ? 1 + state.idx : id === "s-review" ? total - 1 : total;
     $("bar").style.width = Math.round((step / total) * 100) + "%";
     $("stepLabel").textContent =
-      id === "s-code" ? "第 1 步：輸入邀請碼" :
+      id === "s-code" ? "第 1 步：邀請碼與班級資料" :
       id === "s-q" ? `第 2 步：分享你的問題（${state.idx + 1}／${state.items.length}）` :
       id === "s-review" ? "第 3 步：確認後送出" : "";
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -190,7 +190,10 @@
     const code = $("code").value.trim();
     $("e-code").textContent = "";
     if (!code) return ($("e-code").textContent = "請輸入邀請碼。");
+    const bg = { city: $("city").value, area: $("area").value, years: $("years").value, type: $("type").value, cls: $("cls").value, sen: $("sen").checked ? "是" : "否" };
+    if (!bg.city || !bg.area || !bg.years || !bg.type || !bg.cls) return ($("e-code").textContent = "請把「關於你的班級」每一項都選好。");
     if (!$("agree").checked) return ($("e-code").textContent = "請先勾選同意。");
+    state.bg = bg;
     $("b-code").disabled = true; $("e-code").textContent = "確認中…";
     try {
       state.code = code;
@@ -320,10 +323,8 @@
   $("city").innerHTML = '<option value="">請選擇</option>' + C.CITIES.map((c) => `<option>${esc(c)}</option>`).join("");
 
   $("b-submit").addEventListener("click", async () => {
-    const bg = { city: $("city").value, area: $("area").value, years: $("years").value, type: $("type").value, cls: $("cls").value, sen: $("sen").checked ? "是" : "否" };
     $("e-review").textContent = "";
     if (!state.items.some((it) => it.answer && !it.skipped)) return ($("e-review").textContent = "至少要回答一題才能送出。");
-    if (!bg.city || !bg.area || !bg.years || !bg.type || !bg.cls) return ($("e-review").textContent = "請把「關於你的班級」每一項都選好。");
     // 沿用後端原本的格式；加錄的題目 qid 為 ADD1、ADD2…
     const answers = state.items.map((it) => {
       const skipped = it.skipped || !it.answer;
@@ -336,7 +337,7 @@
     }).filter((a) => !(a.skipped && /^ADD/.test(a.qid)));
     $("b-submit").disabled = true; $("e-review").textContent = "送出中…";
     try {
-      const r = await api("submit", { background: bg, answers });
+      const r = await api("submit", { background: state.bg, answers });
       clearDraft();
       $("done-id").textContent = "回覆編號：" + r.id; show("s-done");
     } catch (e) {
