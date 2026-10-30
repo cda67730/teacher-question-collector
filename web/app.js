@@ -1,15 +1,30 @@
 (() => {
   const C = window.APP_CONFIG;
   const $ = (id) => document.getElementById(id);
-  const state = { code: "", bg: null, idx: 0, answers: [], cur: null };
-  const DRAFT_KEY = "tqc-draft-v1";
+  const esc = (s) => String(s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const DRAFT_KEY = "tqc-draft-v2";
+  const ADD_TEXT = "還有其他想分享、希望有人一起想辦法的狀況嗎？";
+  const ADD_HINT = "可以是任何帶班時遇到的事：孩子、家長、同事、環境都可以。";
+
+  // items：每一題一筆；idx：目前那一題；returnToReview：從確認頁點「修改」進來的
+  const state = { code: "", items: [], idx: 0, returnToReview: false };
+
+  const newItem = (q, extra) => ({
+    qid: q.id, question: q.text, hint: q.hint || "", extra: !!extra,
+    answer: "", transcript: "", voice: false, skipped: false,
+    followups: [], fuAsked: false, followupAnswer: "",
+  });
 
   // ---------- 共用 ----------
   function show(id) {
-    ["s-consent", "s-bg", "s-q", "s-done"].forEach((s) => ($(s).hidden = s !== id));
-    const total = C.QUESTIONS.length + 2;
-    const step = id === "s-consent" ? 0 : id === "s-bg" ? 1 : id === "s-q" ? 2 + state.idx : total;
+    ["s-code", "s-q", "s-review", "s-done"].forEach((s) => ($(s).hidden = s !== id));
+    const total = state.items.length + 2;
+    const step = id === "s-code" ? 0 : id === "s-q" ? 1 + state.idx : id === "s-review" ? total - 1 : total;
     $("bar").style.width = Math.round((step / total) * 100) + "%";
+    $("stepLabel").textContent =
+      id === "s-code" ? "第 1 步：輸入邀請碼" :
+      id === "s-q" ? `第 2 步：分享你的問題（${state.idx + 1}／${state.items.length}）` :
+      id === "s-review" ? "第 3 步：確認後送出" : "";
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
   async function api(action, payload) {
@@ -24,14 +39,14 @@
     return data;
   }
   function saveDraft() {
-    try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ code: state.code, bg: state.bg, idx: state.idx, answers: state.answers })); } catch (e) {}
+    try { localStorage.setItem(DRAFT_KEY, JSON.stringify({ code: state.code, items: state.items, idx: state.idx })); } catch (e) {}
   }
   function loadDraft() {
     try { return JSON.parse(localStorage.getItem(DRAFT_KEY) || "null"); } catch (e) { return null; }
   }
   function clearDraft() { try { localStorage.removeItem(DRAFT_KEY); } catch (e) {} }
 
-  // ---------- 錄音 ----------
+  // ---------- 錄音工具 ----------
   function pickMime() {
     const list = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
     return list.find((m) => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || "";
@@ -44,7 +59,7 @@
       r.readAsDataURL(blob);
     });
   }
-  // 瀏覽器錄的是 webm/mp4，Gemini 不一定支援；轉成 16kHz 單聲道 WAV 再送出（3 分鐘約 5.8 MB）
+  // 瀏覽器錄的是 webm/mp4，轉成 16kHz 單聲道 WAV 再送出（3 分鐘約 5.8 MB）
   async function toWav(blob) {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     const ctx = new Ctx();
@@ -63,138 +78,271 @@
     for (let i = 0, o = 44; i < pcm.length; i++, o += 2) { const s = Math.max(-1, Math.min(1, pcm[i])); v.setInt16(o, s < 0 ? s * 0x8000 : s * 0x7fff, true); }
     return new Blob([buf], { type: "audio/wav" });
   }
-  function makeRecorder(btn, timeEl, target, onTranscribed) {
-    let rec = null, chunks = [], timer = null, secs = 0, stream = null;
-    const label = btn.textContent;
-    const reset = () => { btn.textContent = label; btn.setAttribute("aria-pressed", "false"); clearInterval(timer); };
-    async function start() {
-      if (!navigator.mediaDevices || !window.MediaRecorder) { $("rec-status").textContent = "這個瀏覽器不支援錄音，請直接打字。"; return; }
+  const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+
+  // ---------- 錄音覆蓋視窗：按下就開始錄，按停止 → 轉文字 → 填回欄位 → 關閉 ----------
+  const Rec = (() => {
+    let rec = null, stream = null, chunks = [], timer = null, secs = 0, actx = null, raf = 0;
+    let target = null, onText = null, cancelled = false, busy = false, lastFocus = null;
+
+    function ui(mode, msg) {
+      // mode：rec 錄音中／busy 轉文字中／err 出錯
+      $("rec-title").textContent = mode === "rec" ? "錄音中" : mode === "busy" ? "正在轉成文字…" : "沒有成功";
+      $("rec-dot").className = "rec-dot " + (mode === "rec" ? "on" : mode === "busy" ? "busy" : "");
+      $("rec-msg").textContent = msg;
+      $("rec-stop").hidden = mode !== "rec";
+      $("rec-cancel").textContent = mode === "err" ? "關閉" : "取消";
+      $("rec-cancel").disabled = mode === "busy";
+    }
+    function cleanup() {
+      clearInterval(timer); cancelAnimationFrame(raf);
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+      if (actx && actx.close) actx.close();
+      stream = null; actx = null;
+      $("rec-level").style.width = "0";
+    }
+    function close() {
+      cleanup(); busy = false;
+      $("rec").hidden = true; document.body.style.overflow = "";
+      lastFocus && lastFocus.focus();
+    }
+    function meter() {
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        actx = new Ctx();
+        const an = actx.createAnalyser(); an.fftSize = 512;
+        actx.createMediaStreamSource(stream).connect(an);
+        const data = new Uint8Array(an.fftSize);
+        const tick = () => {
+          an.getByteTimeDomainData(data);
+          let peak = 0; for (let i = 0; i < data.length; i++) peak = Math.max(peak, Math.abs(data[i] - 128));
+          $("rec-level").style.width = Math.min(100, peak * 1.6) + "%";
+          raf = requestAnimationFrame(tick);
+        };
+        tick();
+      } catch (e) { /* 音量條只是輔助，失敗不影響錄音 */ }
+    }
+    async function open(opts) {
+      target = opts.target; onText = opts.onText; cancelled = false; lastFocus = document.activeElement;
+      $("rec-q").textContent = opts.label || "";
+      $("rec-time").textContent = "0:00";
+      $("rec-left").textContent = `最長 ${Math.round(C.MAX_RECORD_SECONDS / 60)} 分鐘`;
+      $("rec").hidden = false; document.body.style.overflow = "hidden";
+      if (!navigator.mediaDevices || !window.MediaRecorder) return ui("err", "這個瀏覽器不支援錄音，請直接打字。");
+      ui("busy", "正在開啟麥克風…"); $("rec-title").textContent = "準備中";
       try { stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } }); }
-      catch (e) { $("rec-status").textContent = "無法使用麥克風，請確認已允許瀏覽器使用麥克風，或直接打字。"; return; }
+      catch (e) { return ui("err", "無法使用麥克風。請確認瀏覽器已允許使用麥克風，或直接打字。"); }
+      if (cancelled) return cleanup();
       const mimeType = pickMime();
       rec = new MediaRecorder(stream, mimeType ? { mimeType, audioBitsPerSecond: 24000 } : undefined);
       chunks = []; secs = 0;
       rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
-      rec.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
-        reset();
-        const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
-        if (blob.size < 2000) { $("rec-status").textContent = "錄音太短，請再試一次。"; return; }
-        $("rec-status").textContent = "正在轉成文字…";
-        btn.disabled = true;
-        try {
-          let send = blob;
-          try { send = await toWav(blob); } catch (e) { console.warn("WAV 轉換失敗，改送原始格式", e); }
-          const data = await api("transcribe", { audio: await blobToBase64(send), mimeType: send.type.split(";")[0] });
-          const text = (data.text || "").trim();
-          target.value = target.value.trim() ? target.value.trim() + "\n" + text : text;
-          onTranscribed && onTranscribed(text);
-          $("rec-status").textContent = text ? "已轉成文字，請檢查並修改不正確的地方。" : "沒有辨識到內容，請再試一次或直接打字。";
-        } catch (e) {
-          $("rec-status").textContent = "轉文字失敗：" + e.message + "。可以再試一次或直接打字。";
-        } finally { btn.disabled = false; }
-      };
+      rec.onstop = onStop;
       rec.start(1000);
-      btn.textContent = "■ 停止錄音"; btn.setAttribute("aria-pressed", "true");
-      $("rec-status").textContent = "錄音中…說完請按停止。";
+      meter();
+      ui("rec", "說完請按「停止並轉文字」");
+      $("rec-stop").focus();
       timer = setInterval(() => {
         secs++;
         const left = C.MAX_RECORD_SECONDS - secs;
-        timeEl.textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}（剩 ${left} 秒）`;
-        if (left <= 0) rec.stop();
+        $("rec-time").textContent = fmt(secs);
+        $("rec-left").textContent = left <= 30 ? `剩 ${left} 秒` : `最長 ${Math.round(C.MAX_RECORD_SECONDS / 60)} 分鐘`;
+        if (left <= 0) stop();
       }, 1000);
     }
-    btn.addEventListener("click", () => (rec && rec.state === "recording" ? rec.stop() : start()));
-    return { stop: () => rec && rec.state === "recording" && rec.stop() };
-  }
+    function stop() { if (rec && rec.state === "recording") rec.stop(); }
+    function cancel() {
+      if (busy) return;
+      cancelled = true;
+      if (rec && rec.state === "recording") rec.stop(); else close();
+    }
+    async function onStop() {
+      const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
+      cleanup();
+      if (cancelled) return close();
+      if (blob.size < 2000) return ui("err", "錄音太短，請再試一次。");
+      busy = true; ui("busy", "請稍等，大約需要幾秒鐘。");
+      try {
+        let send = blob;
+        try { send = await toWav(blob); } catch (e) { console.warn("WAV 轉換失敗，改送原始格式", e); }
+        const data = await api("transcribe", { audio: await blobToBase64(send), mimeType: send.type.split(";")[0] });
+        const text = (data.text || "").trim();
+        busy = false;
+        if (!text) return ui("err", "沒有辨識到內容，請再試一次或直接打字。");
+        target.value = target.value.trim() ? target.value.trim() + "\n" + text : text;
+        target.dispatchEvent(new Event("input"));
+        onText && onText(text);
+        close();
+        target.focus();
+      } catch (e) {
+        busy = false;
+        ui("err", "轉文字失敗：" + e.message + "。可以再試一次或直接打字。");
+      }
+    }
+    $("rec-stop").addEventListener("click", stop);
+    $("rec-cancel").addEventListener("click", cancel);
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("rec").hidden) cancel(); });
+    return { open };
+  })();
 
-  // ---------- 1. 同意 ----------
-  $("b-consent").addEventListener("click", async () => {
+  // ---------- 第 1 頁：邀請碼 ----------
+  $("b-code").addEventListener("click", async () => {
     const code = $("code").value.trim();
-    $("e-consent").textContent = "";
-    if (!code) return ($("e-consent").textContent = "請輸入邀請碼。");
-    if (!$("agree").checked) return ($("e-consent").textContent = "請先勾選同意。");
-    $("b-consent").disabled = true;
+    $("e-code").textContent = "";
+    if (!code) return ($("e-code").textContent = "請輸入邀請碼。");
+    if (!$("agree").checked) return ($("e-code").textContent = "請先勾選同意。");
+    $("b-code").disabled = true; $("e-code").textContent = "確認中…";
     try {
       state.code = code;
       await api("check");
+      $("e-code").textContent = "";
       const d = loadDraft();
-      if (d && d.code === code && d.bg) { Object.assign(state, { bg: d.bg, idx: d.idx, answers: d.answers }); renderQ(); show("s-q"); }
-      else show("s-bg");
-    } catch (e) { $("e-consent").textContent = e.message; }
-    finally { $("b-consent").disabled = false; }
+      if (d && d.code === code && Array.isArray(d.items) && d.items.length) {
+        state.items = d.items; state.idx = Math.min(d.idx || 0, d.items.length - 1);
+      } else {
+        state.items = C.QUESTIONS.map((q) => newItem(q)); state.idx = 0;
+      }
+      renderQ(); show("s-q");
+    } catch (e) { $("e-code").textContent = e.message; }
+    finally { $("b-code").disabled = false; }
   });
+  $("code").addEventListener("keydown", (e) => { if (e.key === "Enter") $("b-code").click(); });
 
-  // ---------- 2. 背景 ----------
-  $("city").innerHTML = '<option value="">請選擇</option>' + C.CITIES.map((c) => `<option>${c}</option>`).join("");
-  $("b-bg").addEventListener("click", () => {
-    const bg = { city: $("city").value, area: $("area").value, years: $("years").value, type: $("type").value, cls: $("cls").value, sen: $("sen").checked ? "是" : "否" };
-    if (!bg.city || !bg.area || !bg.years || !bg.type || !bg.cls) return ($("e-bg").textContent = "請把每一題都選好。");
-    $("e-bg").textContent = "";
-    state.bg = bg; state.idx = 0; state.answers = [];
-    saveDraft(); renderQ(); show("s-q");
-  });
-
-  // ---------- 3. 題目 ----------
-  const rec1 = makeRecorder($("b-rec"), $("rec-time"), $("answer"), (t) => { state.cur.voice = true; state.cur.transcript += (state.cur.transcript ? "\n" : "") + t; });
-  const rec2 = makeRecorder($("b-rec2"), $("rec-time2"), $("fu-answer"), () => { state.cur.voice = true; });
+  // ---------- 第 2 頁：一題一頁 ----------
+  const cur = () => state.items[state.idx];
 
   function renderQ() {
-    const q = C.QUESTIONS[state.idx];
-    state.cur = { voice: false, transcript: "", followups: [], fuShown: false };
-    $("q-num").textContent = `第 ${state.idx + 1} 題，共 ${C.QUESTIONS.length} 題`;
-    $("q-text").textContent = q.text; $("q-hint").textContent = q.hint;
-    $("answer").value = ""; $("fu-answer").value = ""; $("fu").hidden = true; $("fu-list").innerHTML = "";
-    $("rec-status").textContent = ""; $("rec-time").textContent = "最長 3 分鐘"; $("rec-time2").textContent = ""; $("e-q").textContent = "";
-    $("b-next").textContent = state.idx === C.QUESTIONS.length - 1 ? "送出" : "下一步";
+    const it = cur();
+    $("q-num").textContent = it.extra ? "加錄的問題" : `第 ${state.idx + 1} 題`;
+    $("q-text").textContent = it.question; $("q-hint").textContent = it.hint;
+    $("answer").value = it.answer; $("fu-answer").value = it.followupAnswer;
+    $("fu-list").innerHTML = it.followups.map((x) => `<li>${esc(x)}</li>`).join("");
+    $("fu").hidden = !it.followups.length;
+    $("q-status").textContent = it.voice ? "已轉成文字，請檢查並修改不正確的地方。" : "";
+    $("e-q").textContent = "";
+    $("b-prev").hidden = state.returnToReview || state.idx === 0;
+    $("b-skip").textContent = it.extra ? "刪除這題" : "跳過";
+    const last = state.idx === state.items.length - 1;
+    $("b-next").textContent = state.returnToReview ? "回到確認頁" : last ? "看我的回答" : "下一題";
+  }
+  function keep() {
+    const it = cur();
+    it.answer = $("answer").value.trim();
+    it.followupAnswer = $("fu-answer").value.trim();
+    saveDraft();
+  }
+  function goNext() {
+    if (state.returnToReview || state.idx >= state.items.length - 1) { state.returnToReview = false; renderReview(); show("s-review"); return; }
+    state.idx++; renderQ(); show("s-q");
   }
 
-  async function finishQuestion(skipped) {
-    const q = C.QUESTIONS[state.idx];
-    const ans = $("answer").value.trim();
-    state.answers.push({
-      qid: q.id, question: q.text, answer: skipped ? "" : ans, skipped: !!skipped,
-      source: state.cur.voice ? "語音" : "文字",
-      edited: state.cur.voice ? ans !== state.cur.transcript.trim() : false,
-      followups: state.cur.followups, followupAnswer: $("fu-answer").value.trim(),
-    });
-    state.idx++; saveDraft();
-    if (state.idx < C.QUESTIONS.length) { renderQ(); show("s-q"); return; }
-    $("b-next").disabled = true; $("b-skip").disabled = true;
-    $("e-q").textContent = "送出中…";
-    try {
-      const r = await api("submit", { background: state.bg, answers: state.answers });
-      clearDraft();
-      $("done-id").textContent = "回覆編號：" + r.id; show("s-done");
-    } catch (e) {
-      state.idx--; state.answers.pop(); // 讓使用者可以再按一次送出
-      $("e-q").textContent = "送出失敗：" + e.message + "。你的回答還在，請再按一次送出。";
-    } finally { $("b-next").disabled = false; $("b-skip").disabled = false; }
-  }
+  $("b-mic").addEventListener("click", () => {
+    Rec.open({ target: $("answer"), label: cur().question, onText: (t) => {
+      const it = cur(); it.voice = true; it.transcript += (it.transcript ? "\n" : "") + t;
+      $("q-status").textContent = "已轉成文字，請檢查並修改不正確的地方。"; keep();
+    } });
+  });
+  $("b-mic2").addEventListener("click", () => {
+    Rec.open({ target: $("fu-answer"), label: "補充回答", onText: () => { cur().voice = true; keep(); } });
+  });
+  $("answer").addEventListener("input", () => { const it = cur(); it.skipped = false; });
+  $("answer").addEventListener("change", keep);
+  $("fu-answer").addEventListener("change", keep);
 
   $("b-next").addEventListener("click", async () => {
-    rec1.stop(); rec2.stop();
-    const ans = $("answer").value.trim();
+    keep();
+    const it = cur();
     $("e-q").textContent = "";
-    if (!ans) return ($("e-q").textContent = "請錄音或打字回答，或按「跳過這題」。");
-    if (!state.cur.fuShown) {
-      $("b-next").disabled = true; $("e-q").textContent = "稍等一下…";
+    if (!it.answer) return ($("e-q").textContent = it.extra ? "請錄音或打字，或按「刪除這題」。" : "請錄音或打字回答，或按「跳過」。");
+    it.skipped = false;
+    // 每題只追問一次；有需要才顯示，老師可以補充也可以直接往下
+    if (!it.fuAsked) {
+      it.fuAsked = true;
+      const lock = (v) => ["b-next", "b-skip", "b-prev", "b-mic", "b-mic2"].forEach((id) => ($(id).disabled = v));
+      lock(true); $("e-q").textContent = "稍等一下…";
       try {
-        const r = await api("followup", { question: C.QUESTIONS[state.idx].text, answer: ans });
+        const r = await api("followup", { question: it.question, answer: it.answer });
         $("e-q").textContent = "";
         if (r.need && r.questions && r.questions.length) {
-          state.cur.fuShown = true; state.cur.followups = r.questions.slice(0, 2);
-          $("fu-list").innerHTML = state.cur.followups.map((x) => `<li>${x.replace(/[<>&]/g, "")}</li>`).join("");
-          $("fu").hidden = false; $("fu-answer").focus();
-          $("b-next").textContent = "繼續";
+          it.followups = r.questions.slice(0, 2); saveDraft();
+          $("fu-list").innerHTML = it.followups.map((x) => `<li>${esc(x)}</li>`).join("");
+          $("fu").hidden = false;
+          $("fu").scrollIntoView({ behavior: "smooth", block: "center" });
+          $("e-q").textContent = "可以補充，也可以直接按下方按鈕繼續。";
           return;
         }
       } catch (e) { $("e-q").textContent = ""; } // 追問失敗就直接往下
-      finally { $("b-next").disabled = false; }
+      finally { lock(false); }
     }
-    finishQuestion(false);
+    goNext();
   });
-  $("b-skip").addEventListener("click", () => { rec1.stop(); rec2.stop(); finishQuestion(true); });
+  $("b-skip").addEventListener("click", () => {
+    const it = cur();
+    if (it.extra) {
+      state.items.splice(state.idx, 1); state.idx = Math.max(0, state.idx - 1);
+      state.returnToReview = false; saveDraft(); renderReview(); show("s-review"); return;
+    }
+    keep(); it.skipped = true; saveDraft(); goNext();
+  });
+  $("b-prev").addEventListener("click", () => { keep(); state.idx--; renderQ(); show("s-q"); });
 
-  show("s-consent");
+  // ---------- 確認頁 ----------
+  function renderReview() {
+    $("reviewList").innerHTML = state.items.map((it, i) => {
+      const empty = it.skipped || !it.answer;
+      const badge = empty ? "跳過" : it.voice ? "語音" : "文字";
+      const fu = it.followupAnswer ? `<div class="rv-fu">補充：${esc(it.followupAnswer)}</div>` : "";
+      return `<div class="rv">
+        <div class="rv-head"><span class="rv-q">${it.extra ? "加錄" : "第 " + (i + 1) + " 題"}｜${esc(it.question)}</span><span class="badge">${badge}</span></div>
+        <p class="rv-a ${empty ? "muted" : ""}">${empty ? "（沒有回答）" : esc(it.answer)}</p>${fu}
+        <div class="rv-actions"><button type="button" class="ghost" data-edit="${i}">${empty ? "回答這題" : "修改"}</button>
+        ${it.extra ? `<button type="button" class="ghost" data-del="${i}">刪除</button>` : ""}</div>
+      </div>`;
+    }).join("");
+    $("e-review").textContent = "";
+  }
+  $("reviewList").addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.edit != null) { state.idx = Number(b.dataset.edit); state.returnToReview = true; renderQ(); show("s-q"); }
+    if (b.dataset.del != null) { state.items.splice(Number(b.dataset.del), 1); saveDraft(); renderReview(); }
+  });
+  $("b-add").addEventListener("click", () => {
+    const n = state.items.filter((x) => x.extra).length + 1;
+    state.items.push(newItem({ id: "ADD" + n, text: ADD_TEXT, hint: ADD_HINT }, true));
+    state.idx = state.items.length - 1; state.returnToReview = true; saveDraft();
+    renderQ(); show("s-q");
+    Rec.open({ target: $("answer"), label: ADD_TEXT, onText: (t) => {
+      const it = cur(); it.voice = true; it.transcript += (it.transcript ? "\n" : "") + t;
+      $("q-status").textContent = "已轉成文字，請檢查並修改不正確的地方。"; keep();
+    } });
+  });
+
+  $("city").innerHTML = '<option value="">請選擇</option>' + C.CITIES.map((c) => `<option>${esc(c)}</option>`).join("");
+
+  $("b-submit").addEventListener("click", async () => {
+    const bg = { city: $("city").value, area: $("area").value, years: $("years").value, type: $("type").value, cls: $("cls").value, sen: $("sen").checked ? "是" : "否" };
+    $("e-review").textContent = "";
+    if (!state.items.some((it) => it.answer && !it.skipped)) return ($("e-review").textContent = "至少要回答一題才能送出。");
+    if (!bg.city || !bg.area || !bg.years || !bg.type || !bg.cls) return ($("e-review").textContent = "請把「關於你的班級」每一項都選好。");
+    // 沿用後端原本的格式；加錄的題目 qid 為 ADD1、ADD2…
+    const answers = state.items.map((it) => {
+      const skipped = it.skipped || !it.answer;
+      return {
+        qid: it.qid, question: it.question, answer: skipped ? "" : it.answer, skipped,
+        source: it.voice ? "語音" : "文字",
+        edited: it.voice ? it.answer !== it.transcript.trim() : false,
+        followups: it.followups, followupAnswer: it.followupAnswer,
+      };
+    }).filter((a) => !(a.skipped && /^ADD/.test(a.qid)));
+    $("b-submit").disabled = true; $("e-review").textContent = "送出中…";
+    try {
+      const r = await api("submit", { background: bg, answers });
+      clearDraft();
+      $("done-id").textContent = "回覆編號：" + r.id; show("s-done");
+    } catch (e) {
+      $("e-review").textContent = "送出失敗：" + e.message + "。你的回答還在，請再按一次送出。";
+    } finally { $("b-submit").disabled = false; }
+  });
+
+  show("s-code");
 })();
