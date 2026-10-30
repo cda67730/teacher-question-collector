@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>幼兒園現場問題收集</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main id="app" class="wrap">
+  <header class="top">
+    <h1>幼兒園現場問題收集</h1>
+    <p class="muted">說說你在班上遇到、希望有人一起想辦法的狀況。可以用說的，也可以用打字。</p>
+    <div class="progress" aria-hidden="true"><div id="bar"></div></div>
+  </header>
+
+  <!-- 1. 邀請碼與同意 -->
+  <section id="s-consent" class="card">
+    <h2>開始之前</h2>
+    <ul class="muted small">
+      <li>大約需要 10 分鐘，共 3 題。</li>
+      <li>錄音只用來轉成文字，<b>轉完就刪除，不會保存</b>。</li>
+      <li>送出前，系統會把孩子、家長、同事的名字換成代稱。請不要提供可以認出身分的資料。</li>
+      <li>你的回答只用於研究與改善教師支持服務。</li>
+    </ul>
+    <label for="code">邀請碼</label>
+    <input id="code" autocomplete="off" placeholder="請輸入園所提供的邀請碼">
+    <label class="check"><input type="checkbox" id="agree"> 我已了解上述說明，同意參與</label>
+    <p class="err" id="e-consent"></p>
+    <button class="primary" id="b-consent" type="button">開始</button>
+  </section>
+
+  <!-- 2. 背景資料 -->
+  <section id="s-bg" class="card" hidden>
+    <h2>關於你的班級（只填一次）</h2>
+    <label for="city">園所所在縣市</label>
+    <select id="city"></select>
+    <label for="area">園所所在地區</label>
+    <select id="area"><option value="">請選擇</option><option>都會區</option><option>一般鄉鎮</option><option>偏鄉或離島</option></select>
+    <label for="years">教保年資</label>
+    <select id="years"><option value="">請選擇</option><option>未滿 2 年</option><option>2–5 年</option><option>6–10 年</option><option>11–20 年</option><option>20 年以上</option></select>
+    <label for="type">園所類型</label>
+    <select id="type"><option value="">請選擇</option><option>公立</option><option>非營利</option><option>準公共</option><option>私立</option></select>
+    <label for="cls">班級型態</label>
+    <select id="cls"><option value="">請選擇</option><option>幼幼班</option><option>小班</option><option>中班</option><option>大班</option><option>混齡班</option></select>
+    <label class="check"><input type="checkbox" id="sen"> 班上目前有特殊需求或疑似特殊需求的幼兒</label>
+    <p class="err" id="e-bg"></p>
+    <button class="primary" id="b-bg" type="button">下一步</button>
+  </section>
+
+  <!-- 3. 題目 -->
+  <section id="s-q" class="card" hidden>
+    <p class="muted small" id="q-num"></p>
+    <h2 id="q-text"></h2>
+    <p class="muted small" id="q-hint"></p>
+
+    <div class="rec">
+      <button id="b-rec" class="rec-btn" type="button" aria-pressed="false">● 開始錄音</button>
+      <span id="rec-time" class="muted small">最長 3 分鐘</span>
+    </div>
+    <p class="muted small" id="rec-status" aria-live="polite"></p>
+
+    <label for="answer">你的回答（錄音會自動轉成文字，可以直接修改）</label>
+    <textarea id="answer" rows="6" placeholder="也可以直接在這裡打字…"></textarea>
+
+    <div id="fu" hidden>
+      <div class="fu-box">
+        <p class="small"><b>想再多了解一點：</b></p>
+        <ol id="fu-list"></ol>
+        <label for="fu-answer">補充回答（打字或再錄一段）</label>
+        <textarea id="fu-answer" rows="4"></textarea>
+        <div class="rec">
+          <button id="b-rec2" class="rec-btn small-btn" type="button" aria-pressed="false">● 錄音補充</button>
+          <span id="rec-time2" class="muted small"></span>
+        </div>
+      </div>
+    </div>
+
+    <p class="err" id="e-q"></p>
+    <div class="row">
+      <button class="ghost" id="b-skip" type="button">跳過這題</button>
+      <button class="primary" id="b-next" type="button">下一步</button>
+    </div>
+  </section>
+
+  <!-- 4. 完成 -->
+  <section id="s-done" class="card" hidden>
+    <h2>謝謝你！</h2>
+    <p>你的回答已經送出。這些現場的真實問題，會成為之後教師支持系統的基礎。</p>
+    <p class="muted small" id="done-id"></p>
+  </section>
+</main>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
