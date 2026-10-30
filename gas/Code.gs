@@ -34,7 +34,8 @@ function doPost(e) {
     }
   } catch (err) {
     console.error(err);
-    return json_({ ok: false, error: '伺服器發生錯誤，請稍後再試' });
+    // 回傳簡短錯誤原因方便除錯（不含金鑰）；正式上線後可改回通用訊息
+    return json_({ ok: false, error: '伺服器發生錯誤（' + String(err && err.message || err).slice(0, 160) + '）' });
   }
 }
 

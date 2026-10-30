@@ -44,6 +44,25 @@
       r.readAsDataURL(blob);
     });
   }
+  // 瀏覽器錄的是 webm/mp4，Gemini 不一定支援；轉成 16kHz 單聲道 WAV 再送出（3 分鐘約 5.8 MB）
+  async function toWav(blob) {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    const ctx = new Ctx();
+    const decoded = await ctx.decodeAudioData(await blob.arrayBuffer());
+    ctx.close && ctx.close();
+    const rate = 16000, len = Math.ceil(decoded.duration * rate);
+    const off = new OfflineAudioContext(1, len, rate);
+    const src = off.createBufferSource(); src.buffer = decoded; src.connect(off.destination); src.start();
+    const pcm = (await off.startRendering()).getChannelData(0);
+    const buf = new ArrayBuffer(44 + pcm.length * 2), v = new DataView(buf);
+    const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+    w(0, "RIFF"); v.setUint32(4, 36 + pcm.length * 2, true); w(8, "WAVE"); w(12, "fmt ");
+    v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+    w(36, "data"); v.setUint32(40, pcm.length * 2, true);
+    for (let i = 0, o = 44; i < pcm.length; i++, o += 2) { const s = Math.max(-1, Math.min(1, pcm[i])); v.setInt16(o, s < 0 ? s * 0x8000 : s * 0x7fff, true); }
+    return new Blob([buf], { type: "audio/wav" });
+  }
   function makeRecorder(btn, timeEl, target, onTranscribed) {
     let rec = null, chunks = [], timer = null, secs = 0, stream = null;
     const label = btn.textContent;
@@ -64,7 +83,9 @@
         $("rec-status").textContent = "正在轉成文字…";
         btn.disabled = true;
         try {
-          const data = await api("transcribe", { audio: await blobToBase64(blob), mimeType: blob.type.split(";")[0] });
+          let send = blob;
+          try { send = await toWav(blob); } catch (e) { console.warn("WAV 轉換失敗，改送原始格式", e); }
+          const data = await api("transcribe", { audio: await blobToBase64(send), mimeType: send.type.split(";")[0] });
           const text = (data.text || "").trim();
           target.value = target.value.trim() ? target.value.trim() + "\n" + text : text;
           onTranscribed && onTranscribed(text);
