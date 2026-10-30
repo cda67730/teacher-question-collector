@@ -1,6 +1,6 @@
 // 部署 Apps Script 網頁應用程式後，把網址貼在這裡（以 /exec 結尾）
 window.APP_CONFIG = {
-  GAS_URL: "https://script.google.com/macros/s/請替換成你的部署ID/exec",
+  GAS_URL: "https://script.google.com/macros/s/AKfycbwxPzGS2lw3yJwvwBXq8bQ2gfHgs3qxFhFUYwR_k4s4PMGdfHW16CRZ2x39rtYnZr-s/exec",
   MAX_RECORD_SECONDS: 180,
   QUESTIONS: [
     {
