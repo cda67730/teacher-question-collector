@@ -32,7 +32,7 @@
 
 ### 1. 建立後端
 1. 建立一份**新的** Google 試算表，選單「擴充功能 → Apps Script」。
-2. 把 `rag/gas/` 底下的檔案逐一建立並貼上：`Code.gs`、`Chat.gs`、`Knowledge.gs`、`Llm.gs`、`Store.gs`、`Setup.gs`、`Admin.gs`，以及兩個 HTML 檔 `Admin.html`、`TraceView.html`（新增檔案時選「HTML」，名稱分別填 `Admin`、`TraceView`）。
+2. 把 `rag/gas/` 底下的檔案逐一建立並貼上：`Code.gs`、`Chat.gs`、`Knowledge.gs`、`Llm.gs`、`Store.gs`、`Setup.gs`、`Admin.gs`，以及兩個 HTML 檔 `AdminUI.html`、`TraceView.html`（新增檔案時選「HTML」，名稱分別填 `AdminUI`、`TraceView`；Apps Script 不允許指令碼和 HTML 同名）。
 3. 專案設定勾選「在編輯器中顯示 appsscript.json」，貼上 `rag/gas/appsscript.json`。
 4. 左側「服務」＋ → 新增 **Drive API**（v3）。上傳 Word 檔時會用到。
 5. 專案設定 → 指令碼屬性：新增 `GEMINI_API_KEY`。

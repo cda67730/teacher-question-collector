@@ -9,7 +9,7 @@ function onOpen() {
 }
 
 function openAdmin() {
-  const html = HtmlService.createTemplateFromFile('Admin').evaluate().setWidth(1280).setHeight(820);
+  const html = HtmlService.createTemplateFromFile('AdminUI').evaluate().setWidth(1280).setHeight(820);
   SpreadsheetApp.getUi().showModalDialog(html, 'AI 助手後台');
 }
 
