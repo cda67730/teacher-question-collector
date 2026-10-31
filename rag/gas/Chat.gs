@@ -84,7 +84,9 @@ function runChat_(req, opts) {
   const pick = skills.filter(s => s.always || s.tags.some(t => (tri.topics || []).indexOf(t) >= 0));
   if (!pick.some(s => !s.always)) { const def = skills.find(s => s.name === C.default_skill); if (def) pick.push(def); }
   const sysPrompt = String(C.system_prompt || '');
-  const skillText = pick.map(s => '【' + s.name + '】\n' + s.content).join('\n\n');
+  const noTopic = !pick.some(s => !s.always);   // 沒有對應的主題 Skill，且 default_skill 留空
+  const skillText = pick.map(s => '【' + s.name + '】\n' + s.content).join('\n\n') +
+    (noTopic ? (pick.length ? '\n\n' : '') + '（這題沒有對應的主題 Skill：依老師的問題本身與檢索到的知識直接回答，不必套用特定框架。）' : '');
 
   if (!tri.info_enough && Number(req.followups || 0) < maxFu) {
     T('P04 狀態機', '資訊不足 → 追問');

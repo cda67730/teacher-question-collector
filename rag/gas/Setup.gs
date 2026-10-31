@@ -82,7 +82,7 @@ const SETTINGS_DEFAULT = [
     ['chunk_overlap', 80, '段落重疊（字）'],
     ['max_followups', 1, '最多追問幾輪'],
     ['enable_llm_check', true, '是否啟用 L5 依據與轉介檢查'],
-    ['default_skill', '理解孩子', '沒有對應主題時預設載入的 Skill'],
+    ['default_skill', '理解孩子', '沒有對應主題時預設載入的 Skill；留空＝不載入主題 Skill，依問題直接回答（「一律載入」的 Skill 仍會載入）'],
     ['hourly_limit', 300, '每個邀請碼每小時呼叫上限'],
     ['triage_rules', TEXT_DEFAULTS.triage_rules, 'L4 分流規則：轉介等級怎麼判斷、什麼不算、資訊足夠的標準'],
     ['followup_prompt', TEXT_DEFAULTS.followup_prompt, '資訊不足時，追問要怎麼問'],
