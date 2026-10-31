@@ -121,7 +121,7 @@ function runChat_(req, opts) {
   }
   if (!chk.pass) {
     T('P10 降級', '重寫後仍未通過 → 保守回答：' + chk.reasons.join('；'));
-    return finish({ type: 'conservative', message: conservativeMsg_(refTable), sources: [], checks: chk.items });
+    return finish({ type: 'conservative', message: conservativeMsg_(refTable, 'check'), sources: [], checks: chk.items });
   }
   T('P10 組合', '檢查全部通過' + (rewritten ? '（重寫一次後）' : ''));
   const used = {}; (ans.strategies || []).forEach(s => (s.refs || []).forEach(r => used[r] = true));
@@ -166,18 +166,32 @@ function checks_(caseText, ans, hits, C) {
   if (truthy_(C.enable_llm_check)) {
     try {
       const kn = hits.map(h => h.ref + '：' + h.text).join('\n');
-      const l5 = genJson_(C.model_check, '你是學前融合教育 AI 回答的審查器，只輸出 JSON。檢查：(1) 每個策略是否有其引用的知識支撐，沒有自行編造；(2) 老師的描述中是否有應該轉介或找專人的訊號而回答遺漏；(3) 是否有說教或責怪老師、家長的語氣。\n格式：{"pass":true,"issues":[]}\n\n老師描述：\n' + caseText + '\n\n知識：\n' + kn + '\n\n回答：\n' + s, { temperature: 0, noThink: true });
-      const pass = l5.pass !== false;
-      items.push({ name: 'L5 依據與轉介', pass: pass, note: pass ? '有依據、無遺漏轉介' : (l5.issues || []).join('；') });
-      if (!pass) reasons.push.apply(reasons, l5.issues || ['依據或轉介有問題']);
+      const l5 = genJson_(C.model_check, '你是學前融合教育 AI 回答的審查器，只輸出 JSON。逐項檢查回答：\n' +
+        '(1) 依據：每個策略是否大致能從它引用的知識推得；合理的實務延伸（例如把原則轉成具體做法）不算編造，只有知識完全沒提到、或與知識矛盾才算問題。\n' +
+        '(2) 轉介：老師描述中有明確需要專人的訊號（安全、疑似受虐、老師身心危機、長期無效）而回答完全沒提。\n' +
+        '(3) 語氣：說教、責怪老師或家長、或替孩子下診斷。老師自己提到的診斷名稱不算違規，只要回答沒有推測或確認診斷即可。\n' +
+        'severe 為 true 只用在：編造或違反知識、遺漏需要專人的訊號、替孩子下診斷。其他小問題 severe 為 false。\n' +
+        '格式：{"issues":[{"type":"依據|轉介|語氣","severe":false,"note":"一句話說明問題"}]}，沒有問題就回 {"issues":[]}\n\n' +
+        '老師描述：\n' + caseText + '\n\n知識：\n' + kn + '\n\n回答：\n' + s, { temperature: 0, noThink: true });
+      // 模型可能回字串或物件，一律轉成「類型：說明」文字
+      const issues = (l5.issues || []).map(x => typeof x === 'string' ? { type: '', severe: true, note: x }
+        : { type: x.type || '', severe: x.severe !== false, note: x.note || x.issue || x.reason || x.description || JSON.stringify(x) });
+      const severe = issues.filter(i => i.severe);
+      const txt = i => (i.type ? i.type + '：' : '') + i.note;
+      const pass = !severe.length;
+      items.push({ name: 'L5 依據與轉介', pass: pass,
+        note: !issues.length ? '有依據、無遺漏轉介' : (pass ? '小問題（不擋）：' : '') + issues.map(i => (i.severe ? '【嚴重】' : '') + txt(i)).join('；') });
+      if (!pass) reasons.push.apply(reasons, severe.length ? severe.map(txt) : ['依據或轉介有問題']);
     } catch (e) { items.push({ name: 'L5 依據與轉介', pass: true, note: '檢查未完成（略過）：' + e.message }); }
   }
   return { pass: items.every(i => i.pass), items: items, reasons: reasons };
 }
 
-function conservativeMsg_(refTable) {
+function conservativeMsg_(refTable, why) {
   const r = refTable['系統能力不足'] || {};
-  return '謝謝你說出這個狀況。目前知識庫裡沒有足夠、經過檢查的內容可以給你具體建議。' + (r.who ? '建議先和' + r.who + '討論' : '建議先和園長或協同老師討論') + '，也可以申請特教巡迴輔導老師協助。';
+  return '謝謝你說出這個狀況。' + (why === 'check'
+    ? '我整理出的建議沒有通過依據檢查，為了避免給你不夠可靠的內容，這次先不提供具體做法。'
+    : '目前知識庫裡沒有足夠、經過檢查的內容可以給你具體建議。') + (r.who ? '建議先和' + r.who + '討論' : '建議先和園長或協同老師討論') + '，也可以申請特教巡迴輔導老師協助。';
 }
 
 // ---------- P15 紀錄 ----------
