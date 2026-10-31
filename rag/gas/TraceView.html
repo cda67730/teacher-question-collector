@@ -5,7 +5,7 @@
  */
 (function () {
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  const TYPE = { answer: ["回答", "ok"], followup: ["追問", "info"], referral: ["緊急轉介", "crit"], conservative: ["保守回答", "warn"], out_of_scope: ["超出範圍", "muted"] };
+  const TYPE = { answer: ["回答", "ok"], continue: ["延續回覆", "ok"], followup: ["追問", "info"], referral: ["緊急轉介", "crit"], conservative: ["保守回答", "warn"], out_of_scope: ["超出範圍", "muted"] };
   const CSS = `
 .tv{--tv-line:var(--line,#dce2e8);--tv-muted:var(--muted,#5e6b78);--tv-accent:var(--accent,#1e7f7d);--tv-soft:var(--soft,#e2f2f1);--tv-bg:var(--bg,#f5f7f9);
   --tv-ok:#2e7d4f;--tv-warn:#a86a12;--tv-crit:#b23a3a;font-size:13px;line-height:1.6}
@@ -49,6 +49,7 @@
     const ref = t.referral || {};
     const refTxt = ref.category && ref.category !== "none" ? `<span class="tv-tag ${ref.level === "緊急" ? "tv-crit" : "tv-warn"}">${esc(ref.category)}・${esc(ref.level)}</span>${esc(ref.reason || "")}` : '<span class="tv-muted">不需要</span>';
     return `<dl class="tv-kv">
+      ${t.intent ? `<dt>意圖</dt><dd><span class="tv-tag ${t.intent === "與幼教無關" ? "tv-warn" : "tv-info"}">${esc(t.intent)}</span></dd>` : ""}
       <dt>找專人</dt><dd>${refTxt}</dd>
       <dt>主題</dt><dd>${(t.topics || []).map((x) => `<span class="tv-tag tv-info">${esc(x)}</span>`).join("") || '<span class="tv-muted">無</span>'}</dd>
       <dt>服務範圍</dt><dd>${t.in_scope === false ? '<span class="tv-crit">超出範圍</span>' : "是"}</dd>

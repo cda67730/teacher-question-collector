@@ -93,7 +93,7 @@ function adminTestChat(req) {
 }
 
 // ---------- 對話紀錄觀測 ----------
-const LOG_TYPE_NAME = { answer: '回答', followup: '追問', referral: '緊急轉介', conservative: '保守回答', out_of_scope: '超出範圍' };
+const LOG_TYPE_NAME = { answer: '回答', continue: '延續', followup: '追問', referral: '緊急轉介', conservative: '保守回答', out_of_scope: '超出範圍' };
 function jsonOr_(s, d) { try { return JSON.parse(s); } catch (e) { return d; } }
 function feedbackMap_() {
   const fb = {};
@@ -141,7 +141,7 @@ function adminLogs(opts) {
   const pct = (a, b) => b ? Math.round(a / b * 1000) / 10 : null;
   const byType = {}; rows.forEach(r => byType[r.type] = (byType[r.type] || 0) + 1);
   const ups = rows.filter(r => r.fb === 'up').length, downs = rows.filter(r => r.fb === 'down').length;
-  const answered = rows.filter(r => r.type === 'answer');
+  const answered = rows.filter(r => r.type === 'answer' || r.type === 'continue');
   const stats = {
     turns: rows.length,
     sessions: new Set(rows.map(r => r.session)).size,

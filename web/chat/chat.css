@@ -49,3 +49,5 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 .drawer-nav button{padding:4px 10px}
 .drawer-b{flex:1;overflow:auto;padding:14px 16px max(16px,env(safe-area-inset-bottom))}
 @media (min-width:1100px){.scrim{display:none}body.drawer-on .app{margin-right:480px}}
+.opts{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.opt{font-size:14px;padding:6px 12px;border-color:var(--accent);color:var(--accent);border-radius:999px;background:transparent}

@@ -144,7 +144,7 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
     <h3 style="margin:0">對話紀錄與指標</h3>
     <select id="lDays" style="width:auto"><option value="1">今天起 24 小時</option><option value="7" selected>最近 7 天</option><option value="30">最近 30 天</option><option value="0">全部</option></select>
     <select id="lSchool" style="width:auto"><option value="">全部園所</option></select>
-    <select id="lType" style="width:auto"><option value="">全部類型</option><option value="answer">回答</option><option value="followup">追問</option><option value="referral">緊急轉介</option><option value="conservative">保守回答</option><option value="out_of_scope">超出範圍</option></select>
+    <select id="lType" style="width:auto"><option value="">全部類型</option><option value="answer">回答</option><option value="continue">延續</option><option value="followup">追問</option><option value="referral">緊急轉介</option><option value="conservative">保守回答</option><option value="out_of_scope">超出範圍</option></select>
     <input type="text" id="lQ" placeholder="搜尋老師訊息" style="width:180px">
     <label style="font-weight:400;margin:0"><input type="checkbox" id="lTest"> 含後台測試</label>
     <button class="btn" id="lLoad">重新整理</button>
@@ -220,7 +220,7 @@ async function load() {
 }
 
 // ---------- 設定 ----------
-const LONG = ['system_prompt', 'welcome', 'triage_rules', 'followup_prompt', 'answer_rules', 'check_prompt', 'msg_no_knowledge', 'msg_check_failed', 'msg_out_of_scope'];
+const LONG = ['system_prompt', 'welcome', 'continue_prompt', 'continue_options', 'triage_rules', 'followup_prompt', 'answer_rules', 'check_prompt', 'msg_no_knowledge', 'msg_check_failed', 'msg_out_of_scope'];
 function renderSettings() {
   $('settings').innerHTML = D.settings.map((s, i) => {
     const v = s.value; const isBool = v === true || v === false || String(v).toUpperCase() === 'TRUE' || String(v).toUpperCase() === 'FALSE';
@@ -299,12 +299,21 @@ $('upload').onclick = async () => {
 };
 
 // ---------- 測試對話 ----------
-let T = { history: [], nameMap: {}, followups: 0, turn: 0, session: 'admin-test-' + Date.now() };
+let T = { history: [], nameMap: {}, followups: 0, answered: 0, turn: 0, session: 'admin-test-' + Date.now() };
 function restore(s) { let o = String(s == null ? '' : s); Object.entries(T.nameMap).forEach(([n, l]) => o = o.split(l).join(n)); return o; }
 function tMsg(cls, html) { const d = document.createElement('div'); d.className = 'msg ' + cls; d.innerHTML = html; $('tMsgs').appendChild(d); d.scrollIntoView({ block: 'nearest' }); }
 function renderReply(r) {
   if (r.type === 'followup') return esc(restore(r.empathy)) + '\n' + r.questions.map((q, i) => (i + 1) + '. ' + esc(restore(q))).join('\n');
   if (r.type === 'referral') { const f = r.referral; return `<b>需要馬上找專人（${esc(f.category)}・${esc(f.level)}）</b>\n${esc(restore(f.reason))}\n該找誰：${esc(f.who)} ${esc(f.contact)}\n現在要做：${esc(f.now)}`; }
+  if (r.type === 'continue') {
+    const a = r.answer; let h = esc(restore(a.reply));
+    if ((a.strategies || []).length) h += '\n\n<b>可以再試試</b>\n' + a.strategies.map((s, i) => `${i + 1}. ${esc(restore(s.title))}：${esc(restore(s.how))} [${(s.refs || []).join(',')}]`).join('\n');
+    if (a.parent_message) h += '\n\n<b>給家長的訊息草稿</b>\n' + esc(restore(a.parent_message));
+    if ((a.observe || []).length) h += '\n\n<b>觀察重點</b>\n' + a.observe.map(o => '・' + esc(restore(o))).join('\n');
+    if (a.referral) h += '\n\n<b>需要時找專人</b>\n' + esc(restore(a.referral));
+    if ((a.options || []).length) h += '\n\n' + a.options.map(o => `<button class="btn opt" data-opt="${esc(o)}">${esc(o)}</button>`).join(' ');
+    return h;
+  }
   if (r.type !== 'answer') return esc(r.message || '');
   const a = r.answer; let h = esc(restore(a.empathy)) + '\n\n<b>看見與理解</b>\n' + esc(restore(a.understanding)) + '\n\n<b>現在可以試試</b>\n' +
     (a.strategies || []).map((s, i) => `${i + 1}. ${esc(restore(s.title))}：${esc(restore(s.how))} [${(s.refs || []).join(',')}]`).join('\n');
@@ -315,24 +324,35 @@ function renderReply(r) {
   if ((r.sources || []).length) h += '\n\n<span class="note">出處：' + r.sources.map(s => esc(s.ref + ' ' + s.title + (s.page ? ' p.' + s.page : ''))).join('｜') + '</span>';
   return h;
 }
+function botSummary(r) {
+  const a = r.answer || {};
+  if (r.type === 'answer') return [a.empathy, '建議：' + (a.strategies || []).map(s => s.title).join('、')].filter(Boolean).join(' ');
+  if (r.type === 'continue') return [a.reply, (a.strategies || []).length ? '新建議：' + a.strategies.map(s => s.title).join('、') : '', a.parent_message ? '（已提供家長訊息）' : ''].filter(Boolean).join(' ');
+  if (r.type === 'followup') return r.questions.join(' ');
+  return r.message || '';
+}
+$('tMsgs').addEventListener('click', e => { const b = e.target.closest('[data-opt]'); if (b) { $('tIn').value = b.dataset.opt; $('tSend').click(); } });
 $('tSend').onclick = async () => {
   const m = $('tIn').value.trim(); if (!m) return;
   tMsg('t', esc(m)); $('tIn').value = ''; $('tSend').disabled = true; $('tTrace').innerHTML = '<div class="note">處理中…</div>';
   try {
     T.turn = (T.turn || 0) + 1;
-    const r = await run('adminTestChat', { message: m, history: T.history, nameMap: T.nameMap, followups: T.followups, turn: T.turn, session: T.session });
-    T.nameMap = r.nameMap || T.nameMap; T.history.push({ role: 'teacher', text: r.deidText });
+    const r = await run('adminTestChat', { message: m, history: T.history, nameMap: T.nameMap, followups: T.followups, answered: T.answered, turn: T.turn, session: T.session });
+    T.nameMap = r.nameMap || T.nameMap;
+    if (r.newCase) { T.history = []; T.followups = 0; }
+    if (r.answered != null) T.answered = r.answered;
+    T.history.push({ role: 'teacher', text: r.deidText });
     if (r.type === 'followup') T.followups++;
-    T.history.push({ role: 'bot', text: r.type === 'answer' ? JSON.stringify(r.answer) : (r.type === 'followup' ? r.questions.join(' ') : (r.message || '')) });
+    T.history.push({ role: 'bot', text: botSummary(r) });
     tMsg('', renderReply(r));
     $('tTrace').innerHTML = '<div style="padding:10px;border:0">' + TraceView.render(r) + '</div>';
   } catch (e) { tMsg('', '<span style="color:#b23a3a">錯誤：' + esc(e.message) + '</span>'); $('tTrace').innerHTML = ''; }
   finally { $('tSend').disabled = false; }
 };
-$('resetTest').onclick = () => { T = { history: [], nameMap: {}, followups: 0, turn: 0, session: 'admin-test-' + Date.now() }; $('tMsgs').innerHTML = ''; $('tTrace').innerHTML = ''; };
+$('resetTest').onclick = () => { T = { history: [], nameMap: {}, followups: 0, answered: 0, turn: 0, session: 'admin-test-' + Date.now() }; $('tMsgs').innerHTML = ''; $('tTrace').innerHTML = ''; };
 
 // ---------- 對話紀錄 ----------
-const TN = { answer: '回答', followup: '追問', referral: '緊急轉介', conservative: '保守回答', out_of_scope: '超出範圍' };
+const TN = { answer: '回答', continue: '延續', followup: '追問', referral: '緊急轉介', conservative: '保守回答', out_of_scope: '超出範圍' };
 let L = null, logsLoaded = false;
 const k = (v, label, sub, cls) => `<div class="kpi"><b class="${cls || ''}">${v == null ? '—' : esc(v)}</b><span>${esc(label)}</span>${sub ? `<small>${esc(sub)}</small>` : ''}</div>`;
 async function loadLogs() {

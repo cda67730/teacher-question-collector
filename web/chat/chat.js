@@ -3,7 +3,7 @@
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const newSession = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2));
-  let S = { code: "", session: newSession(), history: [], nameMap: {}, followups: 0, turn: 0, welcome: "", trace: false, replies: [], view: -1 };
+  let S = { code: "", session: newSession(), history: [], nameMap: {}, followups: 0, answered: 0, turn: 0, welcome: "", trace: false, replies: [], view: -1 };
 
   async function api(action, payload) {
     if (!C.GAS_URL || C.GAS_URL.includes("請替換")) throw new Error("尚未設定後端網址（chat/config.js）");
@@ -28,12 +28,22 @@
       const f = r.referral;
       return `<h3>這個情況需要馬上找專人（${esc(f.category)}）</h3><p>${R(f.reason)}</p><h3>該找誰</h3><p>${esc(f.who)}${f.contact ? "｜" + esc(f.contact) : ""}</p>${f.now ? `<h3>現在要做的事</h3><p>${esc(f.now)}</p>` : ""}<p class="muted small">是否通報或轉介，由你和園長決定。</p>`;
     }
-    if (r.type !== "answer") return `<p>${esc(r.message)}</p>`;
+    if (r.type !== "answer" && r.type !== "continue") return `<p>${esc(r.message)}</p>`;
     const a = r.answer, src = {};
     (r.sources || []).forEach((s) => (src[s.ref] = s));
+    const chips = (s) => (s.refs || []).filter((x) => src[x]).map((x) => `<button type="button" class="ref" data-ref="${esc(x)}">${esc(x)}</button>`).join("");
+    if (r.type === "continue") {
+      let c = `<p>${R(a.reply)}</p>`;
+      if ((a.strategies || []).length) c += `<h3>可以再試試</h3><ol>${a.strategies.map((s) => `<li><b>${R(s.title)}</b>：${R(s.how)}${chips(s)}</li>`).join("")}</ol>`;
+      if (a.parent_message) c += `<h3>給家長的訊息草稿</h3><div class="pm">${R(a.parent_message)}</div><div class="actions"><button type="button" data-copy="1">複製訊息</button></div>`;
+      if ((a.observe || []).length) c += `<h3>觀察重點</h3><ul>${a.observe.map((o) => `<li>${R(o)}</li>`).join("")}</ul>`;
+      if (a.referral) c += `<h3>需要時找專人</h3><p>${R(a.referral)}</p>`;
+      if ((a.options || []).length) c += `<div class="opts">${a.options.map((o) => `<button type="button" class="opt" data-opt="${esc(o)}">${esc(o)}</button>`).join("")}</div>`;
+      return c;
+    }
     let h = `<p>${R(a.empathy)}</p>`;
     if (a.understanding) h += `<h3>看見與理解</h3><p>${R(a.understanding)}</p>`;
-    h += `<h3>現在可以試試</h3><ol>${(a.strategies || []).map((s) => `<li><b>${R(s.title)}</b>：${R(s.how)}${(s.refs || []).filter((x) => src[x]).map((x) => `<button type="button" class="ref" data-ref="${esc(x)}">${esc(x)}</button>`).join("")}</li>`).join("")}</ol>`;
+    h += `<h3>現在可以試試</h3><ol>${(a.strategies || []).map((s) => `<li><b>${R(s.title)}</b>：${R(s.how)}${chips(s)}</li>`).join("")}</ol>`;
     if (a.parent_message) h += `<h3>給家長的訊息草稿</h3><div class="pm">${R(a.parent_message)}</div><div class="actions"><button type="button" data-copy="1">複製訊息</button></div>`;
     if ((a.observe || []).length) h += `<h3>接下來觀察記錄</h3><ul>${a.observe.map((o) => `<li>${R(o)}</li>`).join("")}</ul>`;
     if (a.teacher_care) h += `<h3>也照顧你自己</h3><p>${R(a.teacher_care)}</p>`;
@@ -59,6 +69,8 @@
         navigator.clipboard?.writeText(t).then(() => (c.textContent = "已複製"), () => (c.textContent = "請手動選取複製"));
         api("feedback", { turn, kind: "複製家長訊息" }).catch(() => {});
       }
+      const op = e.target.closest("[data-opt]");
+      if (op) { if ($("send").disabled) return; return send(op.dataset.opt); }
       const tb = e.target.closest("[data-trace]");
       if (tb) return openDrawer(Number(tb.dataset.trace));
       const f = e.target.closest("[data-fb]");
@@ -67,7 +79,7 @@
         api("feedback", { turn, kind: f.dataset.fb }).catch(() => {});
       }
     });
-    const fbOn = r.type === "answer" || r.type === "referral" || r.type === "conservative";
+    const fbOn = r.type === "answer" || r.type === "continue" || r.type === "referral" || r.type === "conservative";
     if (fbOn || S.trace) {
       const a = document.createElement("div"); a.className = "actions";
       a.innerHTML = (fbOn ? `<button type="button" data-fb="有幫助">👍 有幫助</button><button type="button" data-fb="沒幫助">👎 沒幫助</button>` : "") +
@@ -81,12 +93,15 @@
     const wait = bubble("bot typing", "正在了解狀況、查找資料…");
     $("send").disabled = true; S.turn++;
     try {
-      const r = await api("chat", { message: text, history: S.history, nameMap: S.nameMap, followups: S.followups, turn: S.turn });
+      const r = await api("chat", { message: text, history: S.history, nameMap: S.nameMap, followups: S.followups, answered: S.answered, turn: S.turn });
       r.question = text; S.replies.push(r);
       S.nameMap = r.nameMap || S.nameMap;
+      // 換了新個案：舊的對話不再帶給後端
+      if (r.newCase) { S.history = []; S.followups = 0; }
+      if (r.answered != null) S.answered = r.answered;
       S.history.push({ role: "teacher", text: r.deidText });
       if (r.type === "followup") S.followups++;
-      S.history.push({ role: "bot", text: r.type === "answer" ? [r.answer.empathy, (r.answer.strategies || []).map((s) => s.title).join("、")].join(" ") : r.type === "followup" ? r.questions.join(" ") : r.message || "" });
+      S.history.push({ role: "bot", text: botSummary(r) });
       wait.remove();
       const el = bubble("bot" + (r.type === "referral" ? " flag" : ""), render(r));
       attach(el, r, S.turn);
@@ -96,9 +111,17 @@
     } finally { $("send").disabled = false; $("msg").focus(); }
   }
 
+  function botSummary(r) {
+    const a = r.answer || {};
+    if (r.type === "answer") return [a.empathy, "建議：" + (a.strategies || []).map((s) => s.title).join("、")].filter(Boolean).join(" ");
+    if (r.type === "continue") return [a.reply, (a.strategies || []).length ? "新建議：" + a.strategies.map((s) => s.title).join("、") : "", a.parent_message ? "（已提供家長訊息）" : ""].filter(Boolean).join(" ");
+    if (r.type === "followup") return r.questions.join(" ");
+    return r.message || "";
+  }
+
   function start() {
     $("chat").innerHTML = "";
-    S = Object.assign(S, { session: newSession(), history: [], nameMap: {}, followups: 0, turn: 0, replies: [], view: -1 });
+    S = Object.assign(S, { session: newSession(), history: [], nameMap: {}, followups: 0, answered: 0, turn: 0, replies: [], view: -1 });
     if ($("drawer").classList.contains("open")) openDrawer(-1);
     if (S.welcome) bubble("bot", `<p>${esc(S.welcome)}</p>`);
   }
