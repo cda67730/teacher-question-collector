@@ -3,7 +3,7 @@
 const SHEETS = {
   settings: '設定', skills: 'Skill', skillHist: 'Skill版本', docs: '文件', chunks: '知識段落',
   synonyms: '同義詞', forbidden: '禁止用語', referral: '轉介資源', codes: '邀請碼',
-  admins: '管理員', logs: '對話紀錄', feedback: '回饋',
+  admins: '管理員', logs: '對話紀錄', feedback: '回饋', evalset: '檢索測試',
 };
 
 function ss_() {
@@ -59,12 +59,14 @@ function referral_() {
 }
 
 // ---------- 邀請碼與頻率 ----------
-function checkCode_(code) {
+/** 回傳 { school, trace }；trace 為 true 的邀請碼可以在聊天頁看到流程觀測面板 */
+function codeInfo_(code) {
   if (!code) return null;
   const c = String(code).trim().toUpperCase();
   const hit = rows_('codes').find(r => String(r['邀請碼']).trim().toUpperCase() === c && String(r['啟用']).toUpperCase() !== 'FALSE');
-  return hit ? String(hit['園所代號'] || hit['邀請碼']) : null;
+  return hit ? { school: String(hit['園所代號'] || hit['邀請碼']), trace: truthy_(hit['觀測']) } : null;
 }
+function checkCode_(code) { const i = codeInfo_(code); return i ? i.school : null; }
 function rateOk_(code) {
   const cache = CacheService.getScriptCache();
   const key = 'rate_' + code + '_' + Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyyMMddHH');

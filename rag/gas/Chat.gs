@@ -32,7 +32,9 @@ function triagePrompt_(caseText, topics, categories) {
 function runChat_(req, opts) {
   opts = opts || {};
   const t0 = Date.now(), trace = [];
-  const T = (step, detail) => trace.push({ step: step, detail: detail, ms: Date.now() - t0 });
+  // kind 讓觀測面板知道怎麼呈現：triage、retrieval、checks、skills、prompt、json、text
+  const T = (step, detail, kind) => trace.push({ step: step, kind: kind || (typeof detail === 'string' ? 'text' : 'json'), detail: detail, ms: Date.now() - t0 });
+  const metrics = { retrieved: null, top: null, cited: null, skills: [] };
   const C = cfgAll_();
   const maxFu = Number(C.max_followups == null ? 1 : C.max_followups);
 
@@ -55,10 +57,10 @@ function runChat_(req, opts) {
   const tri = parseJson_(genText_(triRes));
   const qvec = embedParse_(embRes)[0];
   const ref = tri.referral && tri.referral.category && tri.referral.category !== 'none' && tri.referral.level && tri.referral.level !== 'none' ? tri.referral : null;
-  T('L4 分流', tri);
+  T('L4 分流', tri, 'triage');
   T('P06 同義詞擴充', exp.concepts.length ? exp.words.join('、') + ' → ' + exp.concepts.join('、') : '無');
 
-  const base = { nameMap: d.map, deidText: d.text, triage: tri };
+  const base = { nameMap: d.map, deidText: d.text, triage: tri, metrics: metrics };
   const finish = (out) => {
     const res = Object.assign(base, out, { ms: Date.now() - t0 });
     try { logTurn_(req, res, trace); } catch (e) { console.warn(e); }
@@ -83,18 +85,22 @@ function runChat_(req, opts) {
 
   if (!tri.info_enough && Number(req.followups || 0) < maxFu) {
     T('P04 狀態機', '資訊不足 → 追問');
-    T('P05 Skill 載入', pick.map(s => s.name).join('、'));
+    metrics.skills = pick.map(s => s.name);
+    T('P05 Skill 載入', pick.map(s => ({ name: s.name, version: s.version, always: s.always })), 'skills');
     const fu = genJson_(C.model_answer, sysPrompt + '\n\n' + skillText + '\n\n老師的描述資訊不足，缺少：' + (tri.missing || []).join('、') +
       '。請先用一句話同理老師，再依 Skill 的追問清單提出最多 2 個最關鍵、好回答的追問。只輸出 JSON：{"empathy":"","questions":["",""]}\n\n老師的描述：\n' + caseText, { temperature: 0.4, noThink: true });
     T('A1 追問', fu);
     return finish({ type: 'followup', empathy: fu.empathy || '', questions: (fu.questions || []).slice(0, 2) });
   }
   T('P04 狀態機', (tri.info_enough ? '資訊足夠' : '已追問過') + ' → 建議階段' + (ref ? '（附轉介：' + ref.category + '・' + ref.level + '）' : ''));
-  T('P05 Skill 載入', pick.map(s => s.name + ' v' + s.version).join('、'));
+  metrics.skills = pick.map(s => s.name);
+  T('P05 Skill 載入', pick.map(s => ({ name: s.name, version: s.version, always: s.always })), 'skills');
 
   // 4. P06 檢索
-  const hits = search_(qvec, caseText, exp.concepts);
-  T('P06 檢索', hits.map(h => h.ref + ' ' + h.title + (h.page ? ' p.' + h.page : '') + '（' + h.score + '）').join('\n') || '沒有足夠相關的段落');
+  const sd = searchDetail_(qvec, caseText, exp.concepts);
+  const hits = sd.hits;
+  metrics.retrieved = hits.length; metrics.top = sd.cands.length ? sd.cands[0].score : 0;
+  T('P06 檢索', { minScore: sd.minScore, topK: sd.topK, total: sd.total, cands: sd.cands }, 'retrieval');
   if (!hits.length) {
     T('P10 降級', '沒有可用知識 → 保守回答');
     return finish({ type: 'conservative', message: conservativeMsg_(refTable), sources: [] });
@@ -105,11 +111,11 @@ function runChat_(req, opts) {
   let ans, chk, rewritten = false;
   for (let attempt = 0; attempt < 2; attempt++) {
     const prompt = assemble_(sysPrompt, skillText, tri, caseText, hits, history, ref, refWho, attempt ? chk.reasons : null);
-    if (attempt === 0) T('P07 Prompt 組裝', '固定 system prompt ' + sysPrompt.length + ' 字｜Skill ' + skillText.length + ' 字｜知識 ' + hits.length + ' 段｜歷史 ' + history.length + ' 則');
+    if (attempt === 0) T('P07 Prompt 組裝', { summary: '固定 system prompt ' + sysPrompt.length + ' 字｜Skill ' + skillText.length + ' 字｜知識 ' + hits.length + ' 段｜歷史 ' + history.length + ' 則｜共 ' + prompt.length + ' 字', prompt: prompt }, 'prompt');
     ans = genJson_(C.model_answer, prompt, { temperature: Number(C.temperature || 0.3) });
     T(attempt ? 'A1 重寫' : 'A1 生成', '策略 ' + (ans.strategies || []).length + ' 個');
     chk = checks_(caseText, ans, hits, C);
-    T('檢查', chk.items);
+    T('檢查', chk.items, 'checks');
     if (chk.pass) break;
     rewritten = true;
   }
@@ -119,6 +125,8 @@ function runChat_(req, opts) {
   }
   T('P10 組合', '檢查全部通過' + (rewritten ? '（重寫一次後）' : ''));
   const used = {}; (ans.strategies || []).forEach(s => (s.refs || []).forEach(r => used[r] = true));
+  metrics.cited = Object.keys(used).filter(r => hits.some(h => h.ref === r)).length;
+  metrics.usedRefs = Object.keys(used);
   const sources = hits.filter(h => used[h.ref]).map(h => ({ ref: h.ref, title: h.title, source: h.source, page: h.page, evidence: h.evidence, snippet: h.text.slice(0, 280) }));
   const referral = ref ? { category: ref.category, level: ref.level, who: refWho, contact: (refTable[ref.category] || {}).contact || '' } : null;
   return finish({ type: 'answer', answer: ans, sources: sources, referral: referral, checks: chk.items, rewritten: rewritten });
@@ -174,8 +182,14 @@ function conservativeMsg_(refTable) {
 
 // ---------- P15 紀錄 ----------
 function logTurn_(req, res, trace) {
-  append_('logs', [[new Date(), req.session || '', req.school || '', (req.history || []).length + 1, res.deidText || '',
+  const m = res.metrics || {};
+  // 紀錄不存完整 prompt（太長），段落只留前 300 字
+  const tr = JSON.stringify(trace, (k, v) => k === 'prompt' ? undefined : v);
+  const turn = req.turn || Math.floor((req.history || []).length / 2) + 1;
+  append_('logs', [[new Date(), req.session || '', req.school || '', turn, res.deidText || '',
     JSON.stringify(res.triage || {}), res.referral ? res.referral.category + '・' + res.referral.level : '',
     res.type, JSON.stringify(res.answer || res.questions || res.message || ''), (res.sources || []).map(s => s.ref + ':' + s.title).join('｜'),
-    JSON.stringify(res.checks || []), res.rewritten ? '是' : '否', res.ms || '', JSON.stringify(trace).slice(0, 45000)]]);
+    JSON.stringify(res.checks || []), res.rewritten ? '是' : '否', res.ms || '',
+    m.retrieved == null ? '' : m.retrieved, m.top == null ? '' : m.top, m.cited == null ? '' : m.cited, (m.skills || []).join('、'),
+    tr.length > 48000 ? JSON.stringify(trace.map(t => ({ step: t.step, kind: 'text', detail: '（內容過長未保存）', ms: t.ms }))) : tr]]);
 }

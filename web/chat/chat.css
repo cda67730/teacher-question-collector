@@ -36,3 +36,16 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 .typing{color:var(--muted);font-size:14px}
 .composer{position:sticky;bottom:0;background:var(--bg);display:flex;gap:8px;align-items:flex-end;padding:10px 0 max(12px,env(safe-area-inset-bottom))}
 .composer textarea{flex:1;min-width:0}
+.top-actions{display:flex;gap:6px}
+.trace-link{font-size:12px!important;color:var(--muted)}
+/* 流程觀測面板 */
+.scrim{position:fixed;inset:0;background:rgba(10,15,20,.35);z-index:9}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(460px,100%);background:var(--card);border-left:1px solid var(--line);z-index:10;display:flex;flex-direction:column;
+  transform:translateX(100%);visibility:hidden;transition:transform .25s ease,visibility 0s .25s;box-shadow:-8px 0 24px rgba(0,0,0,.08)}
+.drawer.open{transform:none;visibility:visible;transition:transform .25s ease}
+@media (prefers-reduced-motion:reduce){.drawer,.drawer.open{transition:none}}
+.drawer-h{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:14px 16px;border-bottom:1px solid var(--line)}
+.drawer-nav{display:flex;gap:4px}
+.drawer-nav button{padding:4px 10px}
+.drawer-b{flex:1;overflow:auto;padding:14px 16px max(16px,env(safe-area-inset-bottom))}
+@media (min-width:1100px){.scrim{display:none}body.drawer-on .app{margin-right:480px}}

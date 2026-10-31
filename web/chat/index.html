@@ -11,7 +11,10 @@
 <div class="app">
   <header class="top">
     <h1 id="botName">融合教育小幫手</h1>
-    <button class="ghost" id="reset" type="button" hidden>開新問題</button>
+    <div class="top-actions">
+      <button class="ghost" id="traceBtn" type="button" hidden aria-controls="drawer" aria-expanded="false">🔍 流程</button>
+      <button class="ghost" id="reset" type="button" hidden>開新問題</button>
+    </div>
   </header>
 
   <section id="gate" class="gate">
@@ -30,7 +33,22 @@
     <button class="primary" id="send" type="submit">送出</button>
   </form>
 </div>
+
+<!-- 流程觀測面板：只有邀請碼「觀測」欄為 TRUE 時出現 -->
+<div class="scrim" id="scrim" hidden></div>
+<aside id="drawer" class="drawer" aria-hidden="true" aria-labelledby="drawerTitle">
+  <div class="drawer-h">
+    <div><b id="drawerTitle">回答流程</b><div class="muted small" id="drawerSub"></div></div>
+    <div class="drawer-nav">
+      <button class="ghost" id="dPrev" type="button" aria-label="上一回合">‹</button>
+      <button class="ghost" id="dNext" type="button" aria-label="下一回合">›</button>
+      <button class="ghost" id="dClose" type="button" aria-label="關閉">✕</button>
+    </div>
+  </div>
+  <div class="drawer-b" id="drawerBody"></div>
+</aside>
 <script src="config.js"></script>
+<script src="trace.js"></script>
 <script src="chat.js"></script>
 </body>
 </html>

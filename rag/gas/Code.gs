@@ -11,15 +11,16 @@ function doGet() { return json_({ ok: true, service: 'inclusive-ed-rag' }); }
 function doPost(e) {
   try {
     const req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
-    const school = checkCode_(req.code);
-    if (!school) return json_({ ok: false, error: '邀請碼不正確或已停用' });
+    const info = codeInfo_(req.code);
+    if (!info) return json_({ ok: false, error: '邀請碼不正確或已停用' });
+    const school = info.school;
     if (!rateOk_(req.code)) return json_({ ok: false, error: '使用次數過多，請稍後再試' });
     req.school = school;
     switch (req.action) {
-      case 'check': return json_({ ok: true, botName: cfg_('bot_name') || '融合教育小幫手', welcome: cfg_('welcome') || '' });
+      case 'check': return json_({ ok: true, botName: cfg_('bot_name') || '融合教育小幫手', welcome: cfg_('welcome') || '', trace: info.trace });
       case 'chat':
         if (!String(req.message || '').trim()) return json_({ ok: false, error: '請輸入內容' });
-        return json_(Object.assign({ ok: true }, runChat_(req)));
+        return json_(Object.assign({ ok: true }, runChat_(req, { trace: info.trace })));
       case 'feedback':
         append_('feedback', [[new Date(), req.session || '', req.turn || '', req.kind || '', String(req.note || '').slice(0, 500)]]);
         return json_({ ok: true });

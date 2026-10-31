@@ -40,6 +40,31 @@ th{background:var(--bg);font-weight:600;position:sticky;top:0}
 .trace b{color:var(--accent)}
 #toast{position:fixed;bottom:14px;right:14px;background:var(--ink);color:#fff;padding:8px 14px;border-radius:8px;display:none}
 .chunk{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:6px 0;white-space:pre-wrap;font-size:13px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin:10px 0 14px}
+.kpi{border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+.kpi b{display:block;font-size:22px;font-variant-numeric:tabular-nums}
+.kpi span{color:var(--muted);font-size:12px}
+.kpi small{display:block;color:var(--muted);font-size:11px}
+.cols{display:grid;grid-template-columns:1fr 300px;gap:14px}
+.box{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px}
+.box h4{margin:0 0 6px;font-size:13px}
+.box li{margin:3px 0;font-size:13px}
+.box li a{cursor:pointer;color:var(--ink)}
+tr.click{cursor:pointer} tr.click:hover{background:var(--bg)} tr.sel{background:var(--soft)}
+td.num{text-align:right;font-variant-numeric:tabular-nums}
+.t-answer{color:var(--ok)} .t-followup{color:var(--accent)} .t-referral{color:var(--err)} .t-conservative{color:var(--warn)} .t-out_of_scope{color:var(--muted)}
+.bad{color:var(--err);font-weight:600}
+.side{position:fixed;top:0;right:0;bottom:0;width:560px;max-width:100%;background:#fff;border-left:1px solid var(--line);box-shadow:-8px 0 24px rgba(0,0,0,.1);z-index:5;display:flex;flex-direction:column;transform:translateX(100%);visibility:hidden;transition:transform .2s,visibility 0s .2s}
+.side.open{transform:none;visibility:visible;transition:transform .2s}
+.side-h{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line)}
+.side-tabs{display:flex;gap:4px;padding:6px 14px 0;border-bottom:1px solid var(--line)}
+.side-tabs button{border:0;background:none;padding:6px 10px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;font:inherit}
+.side-tabs button.on{color:var(--accent);border-bottom-color:var(--accent)}
+.side-b{flex:1;overflow:auto;padding:12px 14px}
+.conv .msg{font-size:13px}
+.conv .msg.cur{outline:2px solid var(--accent)}
+.res-命中{color:var(--ok);font-weight:600} .res-未達門檻{color:var(--warn);font-weight:600} .res-沒找到{color:var(--err);font-weight:600}
+.cand-ok{color:var(--ok);font-weight:600}
 </style>
 </head>
 <body>
@@ -48,6 +73,8 @@ th{background:var(--bg);font-weight:600;position:sticky;top:0}
   <button data-t="skill">Skill</button>
   <button data-t="kb">知識庫</button>
   <button data-t="test">測試對話</button>
+  <button data-t="logs">對話紀錄</button>
+  <button data-t="eval">命中率測試</button>
   <button data-t="other">其他設定</button>
   <span class="me" id="me">載入中…</span>
 </nav>
@@ -112,6 +139,44 @@ th{background:var(--bg);font-weight:600;position:sticky;top:0}
   </div>
 </section>
 
+<section id="logs">
+  <div class="row">
+    <h3 style="margin:0">對話紀錄與指標</h3>
+    <select id="lDays" style="width:auto"><option value="1">今天起 24 小時</option><option value="7" selected>最近 7 天</option><option value="30">最近 30 天</option><option value="0">全部</option></select>
+    <select id="lSchool" style="width:auto"><option value="">全部園所</option></select>
+    <select id="lType" style="width:auto"><option value="">全部類型</option><option value="answer">回答</option><option value="followup">追問</option><option value="referral">緊急轉介</option><option value="conservative">保守回答</option><option value="out_of_scope">超出範圍</option></select>
+    <input type="text" id="lQ" placeholder="搜尋老師訊息" style="width:180px">
+    <label style="font-weight:400;margin:0"><input type="checkbox" id="lTest"> 含後台測試</label>
+    <button class="btn" id="lLoad">重新整理</button>
+  </div>
+  <div class="kpis" id="lKpis"></div>
+  <div class="cols">
+    <div class="list" style="max-height:520px"><table><thead><tr><th>時間</th><th>園所</th><th>輪</th><th>老師訊息（去識別化）</th><th>類型</th><th>檢索</th><th>最高分</th><th>引用</th><th>回饋</th><th>秒</th></tr></thead><tbody id="lRows"><tr><td colspan="10" class="note">載入中…</td></tr></tbody></table></div>
+    <div>
+      <div class="box"><h4>知識缺口 <span class="note">檢索沒命中或只能保守回答的問題，請專家補資料</span></h4><ol id="lGaps" style="padding-left:18px;margin:0"></ol></div>
+      <div class="box"><h4>常被引用的文件</h4><ol id="lDocs" style="padding-left:18px;margin:0"></ol></div>
+      <div class="box note" style="font-size:12px;line-height:1.6"><b>指標怎麼算</b><br>
+        檢索命中率＝走到檢索的回合中，至少有 1 段超過門檻的比例<br>
+        引用率＝回答實際引用的段數 ÷ 檢索採用的段數（越高代表找到的資料越對題）<br>
+        平均最高分＝每回合第一名段落的相似度平均，可用來調整「min_score」門檻<br>
+        真正的命中率要用「命中率測試」分頁，以專家標好的題目來量</div>
+    </div>
+  </div>
+</section>
+
+<section id="eval">
+  <h3>命中率測試 <span class="note">專家寫下「老師可能會這樣問」＋「應該找到哪份文件」，系統逐題檢索，看有沒有找到</span></h3>
+  <div class="grid3" style="grid-template-columns:2fr 1.2fr 1fr auto;align-items:end">
+    <div><label>測試問題</label><input type="text" id="eQ" placeholder="例：收玩具時孩子一直丟東西，怎麼辦？"></div>
+    <div><label>應命中文件</label><select id="eDoc"></select></div>
+    <div><label>備註</label><input type="text" id="eNote" placeholder="例：轉銜時段"></div>
+    <div><button class="btn" id="eAdd">＋ 加入</button></div>
+  </div>
+  <p class="row"><button class="btn pri" id="eRun">執行測試</button><span class="note" id="eStatus">一個文件應命中多份時，可以直接在試算表「檢索測試」的「應命中文件ID」用逗號分隔</span></p>
+  <div class="kpis" id="eKpis"></div>
+  <div class="list" style="max-height:480px"><table><thead><tr><th>測試問題</th><th>應命中</th><th>結果</th><th>名次</th><th>最高分</th><th>說明</th><th></th></tr></thead><tbody id="eRows"></tbody></table></div>
+</section>
+
 <section id="other">
   <h3>其他設定</h3>
   <p>以下對照表直接在試算表裡編輯即可，修改後約 1 分鐘生效：</p>
@@ -126,7 +191,14 @@ th{background:var(--bg);font-weight:600;position:sticky;top:0}
   <p><a id="sheetLink" target="_blank">開啟試算表</a></p>
 </section>
 
+<aside class="side" id="side" aria-hidden="true">
+  <div class="side-h"><div><b id="sTitle">回合明細</b><div class="note" id="sSub"></div></div><button class="btn" id="sClose">✕ 關閉</button></div>
+  <div class="side-tabs"><button data-st="trace" class="on">流程</button><button data-st="conv">整段對話</button><button data-st="raw">回答原文</button></div>
+  <div class="side-b" id="sBody"></div>
+</aside>
+
 <div id="toast"></div>
+<?!= include('TraceView'); ?>
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -143,6 +215,7 @@ async function load() {
   try { D = await run('adminLoad'); } catch (e) { $('me').textContent = ''; document.body.innerHTML = '<p style="padding:20px;color:#b23a3a">' + esc(e.message) + '</p>'; return; }
   $('me').textContent = D.me; $('sheetLink').href = D.sheetUrl;
   renderSettings(); renderSkills(); renderDocs();
+  renderEvalDocs();
   $('topicList').innerHTML = D.topics.map(t => `<option value="${esc(t)}">`).join('');
 }
 
@@ -226,7 +299,7 @@ $('upload').onclick = async () => {
 };
 
 // ---------- 測試對話 ----------
-let T = { history: [], nameMap: {}, followups: 0 };
+let T = { history: [], nameMap: {}, followups: 0, turn: 0, session: 'admin-test-' + Date.now() };
 function restore(s) { let o = String(s == null ? '' : s); Object.entries(T.nameMap).forEach(([n, l]) => o = o.split(l).join(n)); return o; }
 function tMsg(cls, html) { const d = document.createElement('div'); d.className = 'msg ' + cls; d.innerHTML = html; $('tMsgs').appendChild(d); d.scrollIntoView({ block: 'nearest' }); }
 function renderReply(r) {
@@ -246,16 +319,121 @@ $('tSend').onclick = async () => {
   const m = $('tIn').value.trim(); if (!m) return;
   tMsg('t', esc(m)); $('tIn').value = ''; $('tSend').disabled = true; $('tTrace').innerHTML = '<div class="note">處理中…</div>';
   try {
-    const r = await run('adminTestChat', { message: m, history: T.history, nameMap: T.nameMap, followups: T.followups });
+    T.turn = (T.turn || 0) + 1;
+    const r = await run('adminTestChat', { message: m, history: T.history, nameMap: T.nameMap, followups: T.followups, turn: T.turn, session: T.session });
     T.nameMap = r.nameMap || T.nameMap; T.history.push({ role: 'teacher', text: r.deidText });
     if (r.type === 'followup') T.followups++;
     T.history.push({ role: 'bot', text: r.type === 'answer' ? JSON.stringify(r.answer) : (r.type === 'followup' ? r.questions.join(' ') : (r.message || '')) });
     tMsg('', renderReply(r));
-    $('tTrace').innerHTML = (r.trace || []).map(t => `<div><b>${esc(t.step)}</b>（${t.ms} ms）\n${esc(typeof t.detail === 'string' ? t.detail : JSON.stringify(t.detail, null, 1))}</div>`).join('') + `<div class="note">總耗時 ${r.ms} ms</div>`;
+    $('tTrace').innerHTML = '<div style="padding:10px;border:0">' + TraceView.render(r) + '</div>';
   } catch (e) { tMsg('', '<span style="color:#b23a3a">錯誤：' + esc(e.message) + '</span>'); $('tTrace').innerHTML = ''; }
   finally { $('tSend').disabled = false; }
 };
-$('resetTest').onclick = () => { T = { history: [], nameMap: {}, followups: 0 }; $('tMsgs').innerHTML = ''; $('tTrace').innerHTML = ''; };
+$('resetTest').onclick = () => { T = { history: [], nameMap: {}, followups: 0, turn: 0, session: 'admin-test-' + Date.now() }; $('tMsgs').innerHTML = ''; $('tTrace').innerHTML = ''; };
+
+// ---------- 對話紀錄 ----------
+const TN = { answer: '回答', followup: '追問', referral: '緊急轉介', conservative: '保守回答', out_of_scope: '超出範圍' };
+let L = null, logsLoaded = false;
+const k = (v, label, sub, cls) => `<div class="kpi"><b class="${cls || ''}">${v == null ? '—' : esc(v)}</b><span>${esc(label)}</span>${sub ? `<small>${esc(sub)}</small>` : ''}</div>`;
+async function loadLogs() {
+  $('lLoad').disabled = true; $('lRows').innerHTML = '<tr><td colspan="10" class="note">載入中…</td></tr>';
+  try {
+    L = await run('adminLogs', { days: +$('lDays').value, school: $('lSchool').value, type: $('lType').value, q: $('lQ').value.trim(), includeTest: $('lTest').checked });
+    logsLoaded = true;
+    const cur = $('lSchool').value;
+    $('lSchool').innerHTML = '<option value="">全部園所</option>' + L.schools.map(s => `<option ${s === cur ? 'selected' : ''}>${esc(s)}</option>`).join('');
+    const s = L.stats, bt = s.byType;
+    $('lKpis').innerHTML = k(s.turns, '回合數', s.sessions + ' 段對話') +
+      k(s.hitRate == null ? null : s.hitRate + '%', '檢索命中率', s.retrievalTurns + ' 回合有檢索', s.hitRate != null && s.hitRate < 70 ? 'bad' : '') +
+      k(s.citeRate == null ? null : s.citeRate + '%', '引用率', '引用段數 ÷ 採用段數') +
+      k(s.avgTop, '平均最高分', '門檻 ' + (D.settings.find(x => x.key === 'min_score') || {}).value) +
+      k(s.upRate == null ? null : s.upRate + '%', '👍 比例', s.ups + ' 👍／' + s.downs + ' 👎') +
+      k(s.copied, '複製家長訊息') +
+      k(s.rewriteRate == null ? null : s.rewriteRate + '%', '重寫比例', '第一版沒通過檢查') +
+      k(s.avgMs == null ? null : (s.avgMs / 1000).toFixed(1) + ' 秒', '平均耗時') +
+      k((bt.answer || 0) + '／' + (bt.followup || 0), '回答／追問') +
+      k((bt.referral || 0) + '／' + (bt.conservative || 0), '緊急轉介／保守', '', (bt.conservative || 0) ? 'bad' : '');
+    $('lRows').innerHTML = L.rows.map(r => `<tr class="click" data-row="${r.row}"><td class="note">${esc(r.time.slice(5))}</td><td>${esc(r.school)}</td><td class="num">${esc(r.turn)}</td><td>${esc(r.msg)}</td>
+      <td class="t-${esc(r.type)}">${esc(TN[r.type] || r.type)}${r.referral ? '<br><span class="note">' + esc(r.referral) + '</span>' : ''}</td>
+      <td class="num ${r.retrieved === 0 ? 'bad' : ''}">${r.retrieved == null ? '—' : r.retrieved}</td><td class="num">${r.top == null ? '—' : r.top}</td><td class="num">${r.cited == null ? '—' : r.cited}</td>
+      <td>${r.fb === 'up' ? '👍' : r.fb === 'down' ? '👎' : ''}${r.copied ? ' 📋' : ''}</td><td class="num">${r.ms ? (r.ms / 1000).toFixed(1) : ''}</td></tr>`).join('') || '<tr><td colspan="10" class="note">這段期間沒有紀錄</td></tr>';
+    $('lRows').querySelectorAll('tr.click').forEach(tr => tr.onclick = () => openDetail(+tr.dataset.row));
+    $('lGaps').innerHTML = L.gaps.map(g => `<li><a data-row="${g.row}">${esc(g.msg)}</a> <span class="note">${esc(g.time.slice(5))}${g.top != null ? '｜最高 ' + g.top : ''}</span></li>`).join('') || '<li class="note">目前沒有</li>';
+    $('lGaps').querySelectorAll('a').forEach(a => a.onclick = () => openDetail(+a.dataset.row));
+    $('lDocs').innerHTML = L.topDocs.map(d => `<li>${esc(d.title)} <span class="note">${d.n} 次</span></li>`).join('') || '<li class="note">目前沒有</li>';
+  } catch (e) { $('lRows').innerHTML = `<tr><td colspan="10" style="color:#b23a3a">${esc(e.message)}</td></tr>`; }
+  finally { $('lLoad').disabled = false; }
+}
+['lDays', 'lSchool', 'lType', 'lTest'].forEach(id => $(id).onchange = loadLogs);
+$('lQ').onkeydown = e => { if (e.key === 'Enter') loadLogs(); };
+$('lLoad').onclick = loadLogs;
+document.querySelector('nav button[data-t="logs"]').addEventListener('click', () => { if (!logsLoaded) loadLogs(); });
+
+// 側邊明細
+let SD = null, sTab = 'trace';
+function replyText(t, rep) {
+  if (rep == null || rep === '') return '';
+  if (typeof rep === 'string') return rep;
+  if (Array.isArray(rep)) return rep.map((q, i) => (i + 1) + '. ' + q).join('\n');
+  if (rep.strategies) return [rep.empathy, ...(rep.strategies || []).map((s, i) => `${i + 1}. ${s.title}：${s.how} [${(s.refs || []).join(',')}]`)].filter(Boolean).join('\n');
+  return JSON.stringify(rep, null, 1);
+}
+function renderSide() {
+  document.querySelectorAll('.side-tabs button').forEach(b => b.classList.toggle('on', b.dataset.st === sTab));
+  if (!SD) return;
+  if (sTab === 'trace') $('sBody').innerHTML = TraceView.render(SD);
+  if (sTab === 'conv') $('sBody').innerHTML = '<div class="conv">' + SD.turns.map(t => `<div class="msg t ${t.row === SD.row ? 'cur' : ''}"><span class="note">第 ${esc(t.turn)} 輪｜${esc(t.time)}</span>\n${esc(t.msg)}</div>
+    <div class="msg ${t.row === SD.row ? 'cur' : ''}"><b class="t-${esc(t.type)}">${esc(TN[t.type] || t.type)}</b>${t.fb ? '｜' + esc(t.fb) : ''}\n${esc(replyText(t.type, t.reply))}</div>`).join('') + '</div>';
+  if (sTab === 'raw') $('sBody').innerHTML = `<div class="msg t">${esc(SD.msg)}</div><p class="note">分流</p><pre class="chunk">${esc(JSON.stringify(SD.triage, null, 1))}</pre><p class="note">回答（JSON）</p><pre class="chunk">${esc(JSON.stringify(SD.reply, null, 1))}</pre><p class="note">引用：${esc(SD.sources || '無')}</p>`;
+}
+async function openDetail(row) {
+  $('side').classList.add('open'); $('side').setAttribute('aria-hidden', 'false'); $('sBody').innerHTML = '<p class="note">載入中…</p>';
+  document.querySelectorAll('#lRows tr').forEach(tr => tr.classList.toggle('sel', +tr.dataset.row === row));
+  try {
+    SD = await run('adminLogDetail', row);
+    $('sTitle').textContent = `第 ${SD.turn} 輪｜${TN[SD.type] || SD.type}`;
+    $('sSub').textContent = `${SD.time}｜${SD.school}｜Session ${SD.session.slice(0, 8)}`;
+    renderSide();
+  } catch (e) { $('sBody').innerHTML = `<p style="color:#b23a3a">${esc(e.message)}</p>`; }
+}
+document.querySelectorAll('.side-tabs button').forEach(b => b.onclick = () => { sTab = b.dataset.st; renderSide(); });
+$('sClose').onclick = () => { $('side').classList.remove('open'); $('side').setAttribute('aria-hidden', 'true'); };
+document.addEventListener('keydown', e => { if (e.key === 'Escape') $('sClose').click(); });
+
+// ---------- 命中率測試 ----------
+let evalLoaded = false;
+function renderEvalDocs() {
+  $('eDoc').innerHTML = D.docs.filter(d => d.status === '已核可').map(d => `<option value="${esc(d.id)}">${esc(d.title)}（${esc(d.id)}）</option>`).join('') || '<option value="">（還沒有已核可的文件）</option>';
+}
+function renderEvalRows(list) {
+  const title = id => (D.docs.find(d => d.id === id) || {}).title || id;
+  $('eRows').innerHTML = list.map(r => `<tr><td>${esc(r.q)}${r.note ? '<br><span class="note">' + esc(r.note) + '</span>' : ''}</td>
+    <td class="note">${String(r.expect).split(/[,，、\s]+/).filter(Boolean).map(x => esc(title(x))).join('<br>')}</td>
+    <td class="res-${esc(r.result)}">${esc(r.result || '未測')}</td><td class="num">${esc(r.rank || '')}</td><td class="num">${esc(r.top || '')}</td>
+    <td class="note">${esc(r.hit || '')}${r.cands ? '<details><summary>前 5 名</summary>' + r.cands.map((c, i) => `<div class="${c.ok ? 'cand-ok' : ''}">${i + 1}. ${esc(c.title)}${c.page ? ' p.' + esc(c.page) : ''}（${c.score}${c.pass ? '' : '，未達門檻'}）</div>`).join('') + '</details>' : ''}</td>
+    <td><button class="btn" data-del="${r.row}">刪除</button></td></tr>`).join('') || '<tr><td colspan="7" class="note">還沒有測試題。建議每份重要文件至少寫 2–3 題老師的口語問法。</td></tr>';
+  $('eRows').querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { b.disabled = true; try { renderEvalRows(await run('adminDeleteEval', +b.dataset.del)); } catch (e) { toast(e.message, 4000); } });
+}
+async function loadEval() { try { renderEvalRows(await run('adminEvalList')); evalLoaded = true; } catch (e) { $('eRows').innerHTML = `<tr><td colspan="7" style="color:#b23a3a">${esc(e.message)}</td></tr>`; } }
+document.querySelector('nav button[data-t="eval"]').addEventListener('click', () => { if (!evalLoaded) loadEval(); });
+$('eAdd').onclick = async () => {
+  const q = $('eQ').value.trim(), d = $('eDoc').value;
+  if (!q || !d) return toast('請填寫測試問題並選擇文件');
+  $('eAdd').disabled = true;
+  try { renderEvalRows(await run('adminAddEval', q, d, $('eNote').value.trim())); $('eQ').value = ''; $('eNote').value = ''; toast('已加入'); }
+  catch (e) { toast(e.message, 4000); } finally { $('eAdd').disabled = false; }
+};
+$('eRun').onclick = async () => {
+  $('eRun').disabled = true; $('eStatus').textContent = '測試中…每題做一次檢索，題目多時需要幾十秒';
+  try {
+    const r = await run('adminRunEval');
+    $('eKpis').innerHTML = k(r.hitRate + '%', 'Hit@' + r.topK, '應命中文件出現在採用段落中的題目比例', r.hitRate < 80 ? 'bad' : '') +
+      k(r.mrr, 'MRR', '1＝每題都排第一') + k(r.avgTop, '平均最高分', '目前門檻 ' + r.minScore) + k(r.n, '題數');
+    renderEvalRows(r.results);
+    const below = r.results.filter(x => x.result === '未達門檻').length, miss = r.results.filter(x => x.result === '沒找到').length;
+    $('eStatus').textContent = `完成。${below ? below + ' 題有找到但分數低於門檻（可考慮調低 min_score 或補同義詞）；' : ''}${miss ? miss + ' 題前 10 名都沒有（文件可能缺內容或切段不好）' : ''}`;
+  } catch (e) { $('eStatus').textContent = '測試失敗：' + e.message; } finally { $('eRun').disabled = false; }
+};
 
 load();
 </script>

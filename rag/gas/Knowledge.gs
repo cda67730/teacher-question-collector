@@ -90,16 +90,27 @@ function loadIndex_() {
   }));
 }
 
-/** qvec 為查詢向量（未壓縮）；回傳前 k 段 */
-function search_(qvec, rawText, concepts, k) {
+/** 檢索明細：回傳門檻、前 10 名候選（含未達門檻者）與最後採用的段落；觀測面板與命中率測試共用 */
+function searchDetail_(qvec, rawText, concepts, k) {
   const q = normVec_(qvec).map(x => Math.round(x * 127));
   const keys = Array.from(new Set((concepts || []).concat(String(rawText).match(/[一-鿿]{2,4}/g) || []))).slice(0, 30);
   const minScore = Number(cfg_('min_score') || 0.45);
-  return loadIndex_().map(c => {
+  const topK = k || Number(cfg_('top_k') || 6);
+  const scored = loadIndex_().map(c => {
     let dot = 0; const v = c.vec;
     for (let i = 0; i < q.length && i < v.length; i++) dot += q[i] * v[i];
     let kw = 0; keys.forEach(w => { if (c.text.indexOf(w) >= 0) kw++; });
-    return { c: c, score: dot / (127 * 127) + Math.min(kw, 5) * 0.01 };
-  }).filter(x => x.score >= minScore).sort((a, b) => b.score - a.score).slice(0, k || Number(cfg_('top_k') || 6))
-    .map((x, i) => ({ ref: 'K' + (i + 1), id: x.c.id, title: x.c.doc.title, source: x.c.doc.source, evidence: x.c.doc.evidence, page: x.c.page, text: x.c.text, score: Math.round(x.score * 1000) / 1000 }));
+    const vecScore = dot / (127 * 127);
+    return { c: c, vec: vecScore, kw: Math.min(kw, 5), score: vecScore + Math.min(kw, 5) * 0.01 };
+  }).sort((a, b) => b.score - a.score);
+  const r3 = x => Math.round(x * 1000) / 1000;
+  const hits = scored.filter(x => x.score >= minScore).slice(0, topK)
+    .map((x, i) => ({ ref: 'K' + (i + 1), id: x.c.id, docId: x.c.docId, title: x.c.doc.title, source: x.c.doc.source, evidence: x.c.doc.evidence, page: x.c.page, text: x.c.text, score: r3(x.score) }));
+  const refOf = {}; hits.forEach(h => refOf[h.id] = h.ref);
+  const cands = scored.slice(0, 10).map((x, i) => ({ rank: i + 1, ref: refOf[x.c.id] || '', id: x.c.id, docId: x.c.docId, title: x.c.doc.title, page: x.c.page,
+    score: r3(x.score), vec: r3(x.vec), kw: x.kw, pass: !!refOf[x.c.id], text: x.c.text.slice(0, 300) }));
+  return { minScore: minScore, topK: topK, total: scored.length, cands: cands, hits: hits };
 }
+
+/** qvec 為查詢向量（未壓縮）；回傳前 k 段 */
+function search_(qvec, rawText, concepts, k) { return searchDetail_(qvec, rawText, concepts, k).hits; }
