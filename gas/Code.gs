@@ -28,7 +28,7 @@ function doPost(e) {
     switch (req.action) {
       case 'check': return json_({ ok: true });
       case 'transcribe': return json_({ ok: true, text: transcribe_(req.audio, req.mimeType) });
-      case 'followup': return json_(Object.assign({ ok: true }, followup_(req.question, req.answer)));
+      case 'followup': return json_(Object.assign({ ok: true }, followup_(req.question, req.answer, req.known)));
       case 'submit': return json_({ ok: true, id: submit_(school, req.background, req.answers) });
       default: return json_({ ok: false, error: '未知的操作' });
     }
@@ -80,11 +80,12 @@ function transcribe_(b64, mimeType) {
 }
 
 // 追問：情境不清楚時，最多兩個追問
-function followup_(question, answer) {
+function followup_(question, answer, known) {
   if (!answer) return { need: false, questions: [] };
   const prompt = '你在協助收集幼兒園老師的現場問題。以下是題目與老師的回答。\n' +
     '判斷回答是否已經說明「在什麼情境或時段發生」以及「發生前後發生了什麼或老師怎麼處理」。' +
     '若兩者都清楚，或回答已經很具體，need 為 false。若不清楚，最多提出 2 個簡短、好回答的追問（繁體中文、語氣溫和、不要說教、不要給建議）。\n' +
+    (known ? '老師已經另外填好這些資料，不要再問：' + String(known).slice(0, 500) + '\n追問請聚焦在孩子具體做了什麼、發生前後的經過。\n' : '') +
     '只輸出 JSON：{"need": true, "questions": ["..."]}\n\n題目：' + question + '\n回答：' + String(answer).slice(0, 4000);
   try {
     const r = JSON.parse(gemini_([{ text: prompt }], true));
@@ -120,12 +121,21 @@ function submit_(school, bg, answers) {
     a.qid || '', a.question || '', a.skipped ? '（跳過）' : deidentify_(a.answer || ''),
     a.source || '', a.edited ? '是' : '否',
     (a.followups || []).join('｜'), deidentify_(a.followupAnswer || ''),
-  ]);
+  ].concat(slotCols_(a)));
   if (rows.length) {
     const sh = sheet_('回答');
     sh.getRange(sh.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
   }
   return id;
+}
+
+// 幼兒題的必填資料（填槽）：不是幼兒題的列標「不適用」
+const SLOT_HEAD = ['幼兒月齡', '幼兒年齡', '語言狀態', '發生時段', '已試做法（去識別化）', '試做結果', '資料是否填齊'];
+function slotCols_(a) {
+  const s = a.child && a.slots;
+  if (!s) return ['', '', '', '', '', '', a.skipped ? '' : '不適用'];
+  return [s.ageMonths === '' ? '' : Number(s.ageMonths), s.ageLabel || '', s.language || '', s.situations || '',
+    s.tried === '還沒試過' ? '還沒試過' : deidentify_(s.tried || ''), s.result || '', s.complete ? '是' : '否'];
 }
 
 // ---------- 工具 ----------
@@ -143,6 +153,10 @@ function setup() {
   const a = sheet_('回答');
   if (a.getLastRow() === 0) a.appendRow(['時間', '回覆編號', '園所代號', '縣市', '地區', '年資', '園所類型', '班級型態', '有特殊需求幼兒',
     '題號', '題目', '回答（去識別化）', '來源', '老師是否修改轉錄', '追問', '追問回答（去識別化）']);
+  // 已有資料的「回答」表：把新欄位補在最後，不動舊資料
+  const head = a.getRange(1, 1, 1, a.getLastColumn()).getValues()[0];
+  const add = SLOT_HEAD.filter(h => head.indexOf(h) < 0);
+  if (add.length) a.getRange(1, head.length + 1, 1, add.length).setValues([add]);
   a.setFrozenRows(1);
   const c = sheet_('邀請碼');
   if (c.getLastRow() === 0) { c.appendRow(['邀請碼', '園所代號', '啟用']); c.appendRow(['TEST-2026', '測試園', true]); }

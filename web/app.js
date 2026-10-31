@@ -2,7 +2,7 @@
   const C = window.APP_CONFIG;
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  const DRAFT_KEY = "tqc-draft-v2";
+  const DRAFT_KEY = "tqc-draft-v3";
   const ADD_TEXT = "還有其他想分享、希望有人一起想辦法的狀況嗎？";
   const ADD_HINT = "可以是任何帶班時遇到的事：孩子、家長、同事、環境都可以。";
 
@@ -13,6 +13,9 @@
     qid: q.id, question: q.text, hint: q.hint || "", extra: !!extra,
     answer: "", transcript: "", voice: false, skipped: false,
     followups: [], fuAsked: false, followupAnswer: "",
+    child: q.child === true ? true : q.child === "ask" ? "ask" : false,   // 這題是否要填孩子資料
+    childOn: q.child === true,
+    slots: { ageY: "", ageM: "", lang: "", sits: [], tried: "", notTried: false, result: "" },
   });
 
   // ---------- 共用 ----------
@@ -214,8 +217,66 @@
   // ---------- 第 2 頁：一題一頁 ----------
   const cur = () => state.items[state.idx];
 
+  // ---------- 幼兒題的必填資料 ----------
+  const S = C.CHILD_SLOTS;
+  $("ageM").innerHTML = '<option value="">個月</option>' + Array.from({ length: 12 }, (_, m) => `<option value="${m}">${m} 個月</option>`).join("");
+  $("lang").innerHTML = '<option value="">請選擇</option>' + S.LANGUAGE.map((x) => `<option>${esc(x)}</option>`).join("");
+  $("result").innerHTML = '<option value="">請選擇</option>' + S.RESULTS.map((x) => `<option>${esc(x)}</option>`).join("");
+  $("sits").innerHTML = S.SITUATIONS.map((x, i) => `<label class="chip"><input type="checkbox" value="${esc(x)}" id="sit${i}"> ${esc(x)}</label>`).join("");
+  const slotsOf = (it) => it.slots || (it.slots = { ageY: "", ageM: "", lang: "", sits: [], tried: "", notTried: false, result: "" });
+  function renderSlots(it) {
+    const show = !!it.child;
+    $("slots").hidden = !show;
+    if (!show) return;
+    $("childAskWrap").hidden = it.child !== "ask";
+    $("childAsk").checked = !!it.childOn;
+    $("slotFields").hidden = !it.childOn;
+    const s = slotsOf(it);
+    $("ageY").value = s.ageY; $("ageM").value = s.ageM; $("lang").value = s.lang;
+    $("sits").querySelectorAll("input").forEach((x) => (x.checked = s.sits.indexOf(x.value) >= 0));
+    $("tried").value = s.tried; $("notTried").checked = s.notTried; $("result").value = s.result;
+    syncTried();
+  }
+  function syncTried() {
+    const n = $("notTried").checked;
+    $("tried").disabled = n; $("result").disabled = n;
+    if (n) { $("tried").value = ""; $("result").value = ""; }
+  }
+  function keepSlots() {
+    const it = cur(); if (!it.child) return;
+    it.childOn = it.child === true || $("childAsk").checked;
+    const s = slotsOf(it);
+    Object.assign(s, { ageY: $("ageY").value, ageM: $("ageM").value, lang: $("lang").value,
+      sits: [...$("sits").querySelectorAll("input:checked")].map((x) => x.value),
+      tried: $("tried").value.trim(), notTried: $("notTried").checked, result: $("result").value });
+  }
+  /** 回傳缺少的欄位名稱；空陣列＝填齊 */
+  function missingSlots(it) {
+    if (!it.child || !it.childOn) return [];
+    const s = slotsOf(it), miss = [];
+    if (!s.ageY || (s.ageY !== "1" && s.ageM === "")) miss.push("年齡");
+    if (!s.lang) miss.push("語言狀態");
+    if (!s.sits.length) miss.push("發生時段");
+    if (!s.notTried && !s.tried) miss.push("已試過的做法（或勾「還沒試過」）");
+    if (!s.notTried && s.tried && !s.result) miss.push("試過的結果");
+    return miss;
+  }
+  function slotText(it) {   // 給追問用：告訴 AI 哪些已經知道
+    if (!it.child || !it.childOn) return "";
+    const s = slotsOf(it);
+    return `孩子年齡：${ageLabel(s)}；語言：${s.lang}；發生時段：${s.sits.join("、")}；已試做法：${s.notTried ? "還沒試過" : s.tried + "（" + s.result + "）"}`;
+  }
+  function ageLabel(s) { return s.ageY === "1" ? "未滿 2 歲" : s.ageY ? `${s.ageY} 歲 ${s.ageM || 0} 個月` : ""; }
+  function ageMonths(s) { return s.ageY === "1" ? "" : s.ageY ? Number(s.ageY) * 12 + Number(s.ageM || 0) : ""; }
+  ["ageY", "ageM", "lang", "result"].forEach((id) => $(id).addEventListener("change", () => { keepSlots(); saveDraft(); }));
+  $("sits").addEventListener("change", () => { keepSlots(); saveDraft(); });
+  $("tried").addEventListener("change", () => { keepSlots(); saveDraft(); });
+  $("notTried").addEventListener("change", () => { syncTried(); keepSlots(); saveDraft(); });
+  $("childAsk").addEventListener("change", () => { keepSlots(); $("slotFields").hidden = !cur().childOn; saveDraft(); });
+
   function renderQ() {
     const it = cur();
+    renderSlots(it);
     $("q-num").textContent = it.extra ? "加錄的問題" : `第 ${state.idx + 1} 題`;
     $("q-text").textContent = it.question; $("q-hint").textContent = it.hint;
     $("answer").value = it.answer; $("fu-answer").value = it.followupAnswer;
@@ -229,6 +290,7 @@
     $("b-next").textContent = state.returnToReview ? "回到確認頁" : last ? "看我的回答" : "下一題";
   }
   function keep() {
+    keepSlots();
     const it = cur();
     it.answer = $("answer").value.trim();
     it.followupAnswer = $("fu-answer").value.trim();
@@ -256,6 +318,8 @@
     keep();
     const it = cur();
     $("e-q").textContent = "";
+    const miss = missingSlots(it);
+    if (miss.length) { $("slots").scrollIntoView({ behavior: "smooth", block: "start" }); return ($("e-q").textContent = "請先填好孩子的基本狀況：" + miss.join("、")); }
     if (!it.answer) return ($("e-q").textContent = it.extra ? "請錄音或打字，或按「刪除這題」。" : "請錄音或打字回答，或按「跳過」。");
     it.skipped = false;
     // 每題只追問一次；有需要才顯示，老師可以補充也可以直接往下
@@ -264,7 +328,7 @@
       const lock = (v) => ["b-next", "b-skip", "b-prev", "b-mic", "b-mic2"].forEach((id) => ($(id).disabled = v));
       lock(true); $("e-q").textContent = "稍等一下…";
       try {
-        const r = await api("followup", { question: it.question, answer: it.answer });
+        const r = await api("followup", { question: it.question, answer: it.answer, known: slotText(it) });
         $("e-q").textContent = "";
         if (r.need && r.questions && r.questions.length) {
           it.followups = r.questions.slice(0, 2); saveDraft();
@@ -294,7 +358,8 @@
     $("reviewList").innerHTML = state.items.map((it, i) => {
       const empty = it.skipped || !it.answer;
       const badge = empty ? "跳過" : it.voice ? "語音" : "文字";
-      const fu = it.followupAnswer ? `<div class="rv-fu">補充：${esc(it.followupAnswer)}</div>` : "";
+      const fu = (it.child && it.childOn && !empty ? `<div class="rv-fu">${esc(slotText(it))}</div>` : "") +
+        (it.followupAnswer ? `<div class="rv-fu">補充：${esc(it.followupAnswer)}</div>` : "");
       return `<div class="rv">
         <div class="rv-head"><span class="rv-q">${it.extra ? "加錄" : "第 " + (i + 1) + " 題"}｜${esc(it.question)}</span><span class="badge">${badge}</span></div>
         <p class="rv-a ${empty ? "muted" : ""}">${empty ? "（沒有回答）" : esc(it.answer)}</p>${fu}
@@ -311,7 +376,7 @@
   });
   $("b-add").addEventListener("click", () => {
     const n = state.items.filter((x) => x.extra).length + 1;
-    state.items.push(newItem({ id: "ADD" + n, text: ADD_TEXT, hint: ADD_HINT }, true));
+    state.items.push(newItem({ id: "ADD" + n, text: ADD_TEXT, hint: ADD_HINT, child: C.ADD_CHILD || false }, true));
     state.idx = state.items.length - 1; state.returnToReview = true; saveDraft();
     renderQ(); show("s-q");
     Rec.open({ target: $("answer"), label: ADD_TEXT, onText: (t) => {
@@ -333,6 +398,10 @@
         source: it.voice ? "語音" : "文字",
         edited: it.voice ? it.answer !== it.transcript.trim() : false,
         followups: it.followups, followupAnswer: it.followupAnswer,
+        child: !!(it.child && it.childOn),
+        slots: it.child && it.childOn ? (() => { const s = slotsOf(it); return {
+          ageMonths: ageMonths(s), ageLabel: ageLabel(s), language: s.lang, situations: s.sits.join("、"),
+          tried: s.notTried ? "還沒試過" : s.tried, result: s.notTried ? "" : s.result, complete: missingSlots(it).length === 0 }; })() : null,
       };
     }).filter((a) => !(a.skipped && /^ADD/.test(a.qid)));
     $("b-submit").disabled = true; $("e-review").textContent = "送出中…";

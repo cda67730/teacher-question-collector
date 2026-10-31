@@ -56,3 +56,15 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .rec-actions{display:flex;gap:10px;margin-top:10px;width:100%}
 .rec-actions button{flex:1;white-space:nowrap;padding:12px 10px}
 .stop{background:var(--rec);border-color:var(--rec);color:#fff;font-weight:600}
+.slots{border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;background:var(--bg)}
+.slot-title{margin:0}
+.age{display:flex;gap:6px}
+.chips{border:0;padding:0;margin:6px 0 0}
+.chips legend{font-size:14px;font-weight:500;padding:0;margin-bottom:6px}
+#sits{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:999px;padding:4px 12px;font-size:14px;font-weight:400;margin:0;cursor:pointer;background:var(--card)}
+.chip input{width:auto;margin:0}
+.chip:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
+.row.tight{margin-top:0}
+label.inline{margin:0}
+select.auto{width:auto}

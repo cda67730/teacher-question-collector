@@ -45,6 +45,28 @@
     <h2 id="q-text"></h2>
     <p class="muted small" id="q-hint"></p>
 
+    <!-- 幼兒題：先填孩子的基本資料 -->
+    <div id="slots" class="slots" hidden>
+      <label class="check" id="childAskWrap"><input type="checkbox" id="childAsk"> 這題和某一位孩子有關</label>
+      <div id="slotFields">
+        <p class="small slot-title"><b>先填這位孩子的基本狀況</b> <span class="muted">（不用寫名字）</span></p>
+        <div class="grid2">
+          <div><label for="ageY">孩子年齡</label>
+            <div class="age"><select id="ageY"><option value="">歲</option><option value="1">未滿 2 歲</option><option value="2">2 歲</option><option value="3">3 歲</option><option value="4">4 歲</option><option value="5">5 歲</option><option value="6">6 歲</option></select>
+            <select id="ageM" aria-label="幾個月"><option value="">個月</option></select></div></div>
+          <div><label for="lang">語言狀態</label><select id="lang"></select></div>
+        </div>
+        <fieldset class="chips"><legend>通常在什麼時候發生？<span class="muted small">（可複選）</span></legend><div id="sits"></div></fieldset>
+        <label for="tried">已經試過哪些做法？</label>
+        <textarea id="tried" rows="2" placeholder="例如：先提醒、讓他到旁邊冷靜、和家長聊過…"></textarea>
+        <div class="row tight">
+          <label class="check"><input type="checkbox" id="notTried"> 還沒試過</label>
+          <span class="spacer"></span>
+          <label for="result" class="inline">結果</label><select id="result" class="auto"></select>
+        </div>
+      </div>
+    </div>
+
     <button class="mic" id="b-mic" type="button"><span aria-hidden="true">🎤</span> 用說的回答</button>
     <label for="answer">你的回答 <span class="muted small">（錄音轉好的文字會放在這裡，可以直接修改，也可以打字）</span></label>
     <textarea id="answer" rows="7" placeholder="也可以直接在這裡打字…"></textarea>
