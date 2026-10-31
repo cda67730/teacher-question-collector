@@ -36,6 +36,71 @@ const REFERRAL_DEFAULT = [
   ['系統能力不足', '園長、協同老師或專案特教團隊', '', '把狀況整理成文字，和團隊一起討論'],
 ];
 
+// ---------- 可在後台修改的文字（程式只負責格式與流程，內容都在這裡和「設定」工作表） ----------
+const TEXT_DEFAULTS = {
+  triage_rules: [
+    '轉介等級：',
+    '- 緊急：現在就要找人，例如孩子自述被大人傷害、老師有傷害自己的念頭、正在發生的醫療狀況',
+    '- 需要專人：這幾天內要找人，例如策略試了很久都無效、家長衝突升高',
+    '- 建議諮詢：AI 可以回答，專人能幫更多',
+    '一般玩耍碰撞或跌倒的瘀青、有合理說明的小傷，不屬於兒少保護。',
+    '服務範圍：要求醫療診斷或與幼教無關，算超出範圍。',
+    '資訊足夠：至少知道行為「在什麼情境或時段發生」或「發生前後的經過」其中一項；非常籠統時算不足。',
+  ].join('\n'),
+  followup_prompt: '老師的描述資訊不足。請先用一句話同理老師，再依 Skill 的追問清單提出最多 2 個最關鍵、好回答的追問。',
+  answer_rules: 'strategies 2–3 個；每個策略的 refs 只能用上面提供的 K 編號，至少一個；不得推測診斷或使用標籤化用語；保留「幼兒A」等代稱。',
+  check_prompt: [
+    '逐項檢查回答：',
+    '(1) 依據：每個策略是否大致能從它引用的知識推得；合理的實務延伸（例如把原則轉成具體做法）不算編造，只有知識完全沒提到、或與知識矛盾才算問題。',
+    '(2) 轉介：老師描述中有明確需要專人的訊號（安全、疑似受虐、老師身心危機、長期無效）而回答完全沒提。',
+    '(3) 語氣：說教、責怪老師或家長、或替孩子下診斷。老師自己提到的診斷名稱不算違規，只要回答沒有推測或確認診斷即可。',
+    '嚴重（會擋下回答）只用在：編造或違反知識、遺漏需要專人的訊號、替孩子下診斷。其他都算小問題。',
+  ].join('\n'),
+  msg_no_knowledge: '謝謝你說出這個狀況。目前知識庫裡沒有足夠、經過檢查的內容可以給你具體建議。建議先和{who}討論，也可以申請特教巡迴輔導老師協助。',
+  msg_check_failed: '謝謝你說出這個狀況。我整理出的建議沒有通過依據檢查，為了避免給你不夠可靠的內容，這次先不提供具體做法。建議先和{who}討論，也可以申請特教巡迴輔導老師協助。',
+  msg_out_of_scope: '這個問題超出幼兒園教保現場的範圍，建議洽詢相關專業人員。如果是班上孩子的狀況，歡迎描述你看到的情境。',
+};
+/** 讀文字設定；設定表沒有這一項時用預設值 */
+function text_(key) {
+  const v = cfg_(key);
+  return v == null || String(v).trim() === '' ? (TEXT_DEFAULTS[key] || '') : String(v);
+}
+
+const SETTINGS_DEFAULT = [
+    ['bot_name', '融合教育小幫手', '老師端顯示的名稱'],
+    ['welcome', '你好，我是融合教育小幫手。說說班上遇到的狀況，我會先了解情境，再給你幾個馬上能用的做法。', '老師端的歡迎訊息'],
+    ['system_prompt', SYSTEM_PROMPT_DEFAULT, '固定 system prompt（第 1 層）'],
+    ['model_triage', 'gemini-2.5-flash', 'L4 分流用模型'],
+    ['model_answer', 'gemini-2.5-flash', 'A1 對話 Agent 用模型（也用於 PDF 轉文字）'],
+    ['model_check', 'gemini-2.5-flash', 'L5 檢查用模型'],
+    ['model_embed', 'gemini-embedding-001', '向量模型（更換後要重新向量化所有文件）'],
+    ['embed_dim', 768, '向量維度'],
+    ['temperature', 0.3, '生成溫度'],
+    ['top_k', 6, '每次檢索取幾段'],
+    ['min_score', 0.45, '相似度門檻，低於此值不採用'],
+    ['chunk_size', 500, '切段長度（字）'],
+    ['chunk_overlap', 80, '段落重疊（字）'],
+    ['max_followups', 1, '最多追問幾輪'],
+    ['enable_llm_check', true, '是否啟用 L5 依據與轉介檢查'],
+    ['default_skill', '理解孩子', '沒有對應主題時預設載入的 Skill'],
+    ['hourly_limit', 300, '每個邀請碼每小時呼叫上限'],
+    ['triage_rules', TEXT_DEFAULTS.triage_rules, 'L4 分流規則：轉介等級怎麼判斷、什麼不算、資訊足夠的標準'],
+    ['followup_prompt', TEXT_DEFAULTS.followup_prompt, '資訊不足時，追問要怎麼問'],
+    ['answer_rules', TEXT_DEFAULTS.answer_rules, '回答的硬性規則（策略數量、出處、用語）'],
+    ['check_prompt', TEXT_DEFAULTS.check_prompt, 'L5 依據與轉介檢查標準：檢查什麼、什麼算嚴重（嚴重才會擋下回答）'],
+    ['msg_no_knowledge', TEXT_DEFAULTS.msg_no_knowledge, '知識庫查不到資料時的回覆；{who} 會換成轉介資源「系統能力不足」的對象'],
+    ['msg_check_failed', TEXT_DEFAULTS.msg_check_failed, '回答沒通過檢查時的回覆；{who} 同上'],
+    ['msg_out_of_scope', TEXT_DEFAULTS.msg_out_of_scope, '超出服務範圍時的回覆'],
+];
+
+/** 設定表已存在時，只補上缺少的設定項，不動已修改的值 */
+function addMissingSettings_() {
+  const s = sh_('settings');
+  const have = s.getRange(1, 1, s.getLastRow(), 1).getValues().map(r => r[0]);
+  const add = SETTINGS_DEFAULT.filter(r => have.indexOf(r[0]) < 0);
+  if (add.length) s.getRange(s.getLastRow() + 1, 1, add.length, 3).setValues(add);
+}
+
 function setup() {
   const ss = ss_();
   const make = (name, head, seed) => {
@@ -55,25 +120,8 @@ function setup() {
     }
     return s;
   };
-  make(SHEETS.settings, ['設定', '值', '說明'], [
-    ['bot_name', '融合教育小幫手', '老師端顯示的名稱'],
-    ['welcome', '你好，我是融合教育小幫手。說說班上遇到的狀況，我會先了解情境，再給你幾個馬上能用的做法。', '老師端的歡迎訊息'],
-    ['system_prompt', SYSTEM_PROMPT_DEFAULT, '固定 system prompt（第 1 層）'],
-    ['model_triage', 'gemini-2.5-flash', 'L4 分流用模型'],
-    ['model_answer', 'gemini-2.5-flash', 'A1 對話 Agent 用模型（也用於 PDF 轉文字）'],
-    ['model_check', 'gemini-2.5-flash', 'L5 檢查用模型'],
-    ['model_embed', 'gemini-embedding-001', '向量模型（更換後要重新向量化所有文件）'],
-    ['embed_dim', 768, '向量維度'],
-    ['temperature', 0.3, '生成溫度'],
-    ['top_k', 6, '每次檢索取幾段'],
-    ['min_score', 0.45, '相似度門檻，低於此值不採用'],
-    ['chunk_size', 500, '切段長度（字）'],
-    ['chunk_overlap', 80, '段落重疊（字）'],
-    ['max_followups', 1, '最多追問幾輪'],
-    ['enable_llm_check', true, '是否啟用 L5 依據與轉介檢查'],
-    ['default_skill', '理解孩子', '沒有對應主題時預設載入的 Skill'],
-    ['hourly_limit', 300, '每個邀請碼每小時呼叫上限'],
-  ]);
+  make(SHEETS.settings, ['設定', '值', '說明'], SETTINGS_DEFAULT);
+  addMissingSettings_();
   make(SHEETS.skills, ['Skill ID', '名稱', '對應主題', '一律載入', '內容', '啟用', '版本', '更新者', '更新時間'],
     SKILLS_DEFAULT.map(s => [s[0], s[1], s[2], s[3], s[4], true, 1, 'setup', new Date()]));
   make(SHEETS.skillHist, ['Skill ID', '版本', '名稱', '對應主題', '一律載入', '內容', '更新者', '更新時間'],

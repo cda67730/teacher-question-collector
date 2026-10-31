@@ -19,11 +19,14 @@ function deid_(text, map) {
 
 // ---------- L4 分流 prompt ----------
 function triagePrompt_(caseText, topics, categories) {
-  return '你是學前融合教育 AI 系統的分流器，只輸出 JSON。根據老師的描述判斷：\n' +
-    '- referral：是否需要專人處理。category 從 ' + JSON.stringify(categories) + ' 選一個，或 "none"；level 為 "緊急"（現在就要找人，例如孩子自述被大人傷害、老師有傷害自己的念頭、正在發生的醫療狀況）、"需要專人"（這幾天內要找人，例如策略試了很久都無效、家長衝突升高）、"建議諮詢"（AI 可以回答，專人能幫更多）或 "none"；reason 一句話。一般玩耍碰撞或跌倒的瘀青、有合理說明的小傷，不屬於兒少保護。\n' +
+  // 規則文字在「設定」的 triage_rules，這裡只放選項清單與輸出格式
+  return '你是學前融合教育 AI 系統的分流器，只輸出 JSON。依下列規則判斷老師的描述：\n' + text_('triage_rules') + '\n\n' +
+    '欄位：\n' +
+    '- referral.category：從 ' + JSON.stringify(categories) + ' 選一個，或 "none"\n' +
+    '- referral.level："緊急"、"需要專人"、"建議諮詢" 或 "none"；referral.reason 一句話\n' +
     '- topics：從 ' + JSON.stringify(topics) + ' 選出相關的（可多選）\n' +
-    '- in_scope：是否屬於幼兒園教保現場的問題（要求醫療診斷或與幼教無關為 false）\n' +
-    '- info_enough：是否已知道行為「在什麼情境或時段發生」或「發生前後的經過」，至少一項才算 true；非常籠統時為 false\n' +
+    '- in_scope：是否屬於服務範圍\n' +
+    '- info_enough：資訊是否足夠\n' +
     '- missing：缺少的關鍵資訊（最多 2 項）\n' +
     '格式：{"referral":{"category":"none","level":"none","reason":""},"topics":[],"in_scope":true,"info_enough":true,"missing":[]}\n\n' +
     '老師的描述（已去識別化）：\n' + caseText;
@@ -76,7 +79,7 @@ function runChat_(req, opts) {
   }
   if (tri.in_scope === false) {
     T('P04 狀態機', '超出服務範圍');
-    return finish({ type: 'out_of_scope', message: '這個問題超出幼兒園教保現場的範圍，建議洽詢相關專業人員。如果是班上孩子的狀況，歡迎描述你看到的情境。' });
+    return finish({ type: 'out_of_scope', message: text_('msg_out_of_scope') });
   }
   const pick = skills.filter(s => s.always || s.tags.some(t => (tri.topics || []).indexOf(t) >= 0));
   if (!pick.some(s => !s.always)) { const def = skills.find(s => s.name === C.default_skill); if (def) pick.push(def); }
@@ -87,8 +90,8 @@ function runChat_(req, opts) {
     T('P04 狀態機', '資訊不足 → 追問');
     metrics.skills = pick.map(s => s.name);
     T('P05 Skill 載入', pick.map(s => ({ name: s.name, version: s.version, always: s.always })), 'skills');
-    const fu = genJson_(C.model_answer, sysPrompt + '\n\n' + skillText + '\n\n老師的描述資訊不足，缺少：' + (tri.missing || []).join('、') +
-      '。請先用一句話同理老師，再依 Skill 的追問清單提出最多 2 個最關鍵、好回答的追問。只輸出 JSON：{"empathy":"","questions":["",""]}\n\n老師的描述：\n' + caseText, { temperature: 0.4, noThink: true });
+    const fu = genJson_(C.model_answer, sysPrompt + '\n\n' + skillText + '\n\n' + text_('followup_prompt') + '\n目前缺少：' + ((tri.missing || []).join('、') || '情境細節') +
+      '\n只輸出 JSON：{"empathy":"","questions":["",""]}\n\n老師的描述：\n' + caseText, { temperature: 0.4, noThink: true });
     T('A1 追問', fu);
     return finish({ type: 'followup', empathy: fu.empathy || '', questions: (fu.questions || []).slice(0, 2) });
   }
@@ -145,7 +148,7 @@ function assemble_(sys, skillText, tri, caseText, hits, history, ref, refWho, fe
     feedback ? '【重寫指示】上一版沒有通過檢查：' + feedback.join('；') + '。請修正後重寫。' : '',
     '輸出格式（只輸出 JSON）：{"empathy":"先回應老師感受的一兩句","understanding":"看見與理解：把行為轉成可觀察事件，推想背後的需要（兩三句）","strategies":[{"title":"策略名稱","how":"具體怎麼做（一兩句）","refs":["K1"]}],"parent_message":"若牽涉家長，給家長的訊息草稿，否則 null","observe":["接下來的觀察重點"],"teacher_care":"若老師提到壓力，一兩句自我照顧建議，否則 null","referral":' +
       (ref ? '"依「' + ref.level + '」說明為什麼需要、該找誰（可找：' + refWho + '）"' : 'null') + '}\n' +
-      '規則：strategies 2–3 個；每個策略的 refs 只能用上面提供的 K 編號，至少一個；不得推測診斷或使用標籤化用語；保留「幼兒A」等代稱。' +
+      '規則：' + text_('answer_rules') +
       (forbiddenWords.length ? '回答中不得出現這些詞（即使是否定句也不要寫）：' + forbiddenWords.join('、') + '。' : ''),
   ].filter(Boolean).join('\n\n');
 }
@@ -166,11 +169,9 @@ function checks_(caseText, ans, hits, C) {
   if (truthy_(C.enable_llm_check)) {
     try {
       const kn = hits.map(h => h.ref + '：' + h.text).join('\n');
-      const l5 = genJson_(C.model_check, '你是學前融合教育 AI 回答的審查器，只輸出 JSON。逐項檢查回答：\n' +
-        '(1) 依據：每個策略是否大致能從它引用的知識推得；合理的實務延伸（例如把原則轉成具體做法）不算編造，只有知識完全沒提到、或與知識矛盾才算問題。\n' +
-        '(2) 轉介：老師描述中有明確需要專人的訊號（安全、疑似受虐、老師身心危機、長期無效）而回答完全沒提。\n' +
-        '(3) 語氣：說教、責怪老師或家長、或替孩子下診斷。老師自己提到的診斷名稱不算違規，只要回答沒有推測或確認診斷即可。\n' +
-        'severe 為 true 只用在：編造或違反知識、遺漏需要專人的訊號、替孩子下診斷。其他小問題 severe 為 false。\n' +
+      // 檢查標準在「設定」的 check_prompt，這裡只放輸出格式
+      const l5 = genJson_(C.model_check, '你是學前融合教育 AI 回答的審查器，只輸出 JSON。\n' + text_('check_prompt') + '\n' +
+        '每個問題的 severe：符合上面「嚴重」的定義為 true，其他為 false。\n' +
         '格式：{"issues":[{"type":"依據|轉介|語氣","severe":false,"note":"一句話說明問題"}]}，沒有問題就回 {"issues":[]}\n\n' +
         '老師描述：\n' + caseText + '\n\n知識：\n' + kn + '\n\n回答：\n' + s, { temperature: 0, noThink: true });
       // 模型可能回字串或物件，一律轉成「類型：說明」文字
@@ -189,9 +190,7 @@ function checks_(caseText, ans, hits, C) {
 
 function conservativeMsg_(refTable, why) {
   const r = refTable['系統能力不足'] || {};
-  return '謝謝你說出這個狀況。' + (why === 'check'
-    ? '我整理出的建議沒有通過依據檢查，為了避免給你不夠可靠的內容，這次先不提供具體做法。'
-    : '目前知識庫裡沒有足夠、經過檢查的內容可以給你具體建議。') + (r.who ? '建議先和' + r.who + '討論' : '建議先和園長或協同老師討論') + '，也可以申請特教巡迴輔導老師協助。';
+  return text_(why === 'check' ? 'msg_check_failed' : 'msg_no_knowledge').split('{who}').join(r.who || '園長或協同老師');
 }
 
 // ---------- P15 紀錄 ----------

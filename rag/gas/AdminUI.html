@@ -220,11 +220,11 @@ async function load() {
 }
 
 // ---------- 設定 ----------
-const LONG = ['system_prompt', 'welcome'];
+const LONG = ['system_prompt', 'welcome', 'triage_rules', 'followup_prompt', 'answer_rules', 'check_prompt', 'msg_no_knowledge', 'msg_check_failed', 'msg_out_of_scope'];
 function renderSettings() {
   $('settings').innerHTML = D.settings.map((s, i) => {
     const v = s.value; const isBool = v === true || v === false || String(v).toUpperCase() === 'TRUE' || String(v).toUpperCase() === 'FALSE';
-    const input = LONG.includes(s.key) ? `<textarea data-i="${i}" rows="${s.key === 'system_prompt' ? 14 : 3}">${esc(v)}</textarea>`
+    const input = LONG.includes(s.key) ? `<textarea data-i="${i}" rows="${s.key === 'system_prompt' ? 14 : /rules|prompt/.test(s.key) ? 7 : 3}">${esc(v)}</textarea>`
       : isBool ? `<label style="font-weight:400"><input type="checkbox" data-i="${i}" ${String(v).toUpperCase() === 'TRUE' ? 'checked' : ''}> 啟用</label>`
       : `<input type="text" data-i="${i}" value="${esc(v)}">`;
     return `<label>${esc(s.key)} <span class="note">${esc(s.note)}</span></label>${input}`;
