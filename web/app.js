@@ -86,7 +86,7 @@
   // ---------- 錄音覆蓋視窗：按下就開始錄，按停止 → 轉文字 → 填回欄位 → 關閉 ----------
   const Rec = (() => {
     let rec = null, stream = null, chunks = [], timer = null, secs = 0, actx = null, raf = 0;
-    let target = null, onText = null, cancelled = false, busy = false, lastFocus = null;
+    let target = null, onText = null, cancelled = false, busy = false, lastFocus = null, hitLimit = false;
 
     function ui(mode, msg) {
       // mode：rec 錄音中／busy 轉文字中／err 出錯
@@ -129,7 +129,7 @@
       target = opts.target; onText = opts.onText; cancelled = false; lastFocus = document.activeElement;
       $("rec-q").textContent = opts.label || "";
       $("rec-time").textContent = "0:00";
-      $("rec-left").textContent = `最長 ${Math.round(C.MAX_RECORD_SECONDS / 60)} 分鐘`;
+      $("rec-left").textContent = `每段最長 ${Math.round(C.MAX_RECORD_SECONDS / 60)} 分鐘，沒說完可以再錄一段接著說`;
       $("rec").hidden = false; document.body.style.overflow = "hidden";
       if (!navigator.mediaDevices || !window.MediaRecorder) return ui("err", "這個瀏覽器不支援錄音，請直接打字。");
       ui("busy", "正在開啟麥克風…"); $("rec-title").textContent = "準備中";
@@ -138,7 +138,7 @@
       if (cancelled) return cleanup();
       const mimeType = pickMime();
       rec = new MediaRecorder(stream, mimeType ? { mimeType, audioBitsPerSecond: 24000 } : undefined);
-      chunks = []; secs = 0;
+      chunks = []; secs = 0; hitLimit = false;
       rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
       rec.onstop = onStop;
       rec.start(1000);
@@ -149,8 +149,8 @@
         secs++;
         const left = C.MAX_RECORD_SECONDS - secs;
         $("rec-time").textContent = fmt(secs);
-        $("rec-left").textContent = left <= 30 ? `剩 ${left} 秒` : `最長 ${Math.round(C.MAX_RECORD_SECONDS / 60)} 分鐘`;
-        if (left <= 0) stop();
+        $("rec-left").textContent = left <= 30 ? `剩 ${left} 秒，時間到會先轉成文字，可以再錄一段接著說` : `每段最長 ${Math.round(C.MAX_RECORD_SECONDS / 60)} 分鐘，沒說完可以再錄一段接著說`;
+        if (left <= 0) { hitLimit = true; stop(); }
       }, 1000);
     }
     function stop() { if (rec && rec.state === "recording") rec.stop(); }
@@ -174,7 +174,7 @@
         if (!text) return ui("err", "沒有辨識到內容，請再試一次或直接打字。");
         target.value = target.value.trim() ? target.value.trim() + "\n" + text : text;
         target.dispatchEvent(new Event("input"));
-        onText && onText(text);
+        onText && onText(text, hitLimit);
         close();
         target.focus();
       } catch (e) {
@@ -272,6 +272,16 @@
   $("notTried").addEventListener("change", () => { syncTried(); keepSlots(); saveDraft(); });
   $("childAsk").addEventListener("change", () => { keepSlots(); $("slotFields").hidden = !cur().childOn; saveDraft(); });
 
+  // 已經有內容時，按鈕改成「再錄一段接著說」
+  function micLabel() {
+    const more = $("answer").value.trim() !== "";
+    $("b-mic").innerHTML = `<span aria-hidden="true">🎤</span> ${more ? "再錄一段接著說" : "用說的回答"}`;
+    const fuMore = $("fu-answer").value.trim() !== "";
+    $("b-mic2").innerHTML = `<span aria-hidden="true">🎤</span> ${fuMore ? "再錄一段接著說" : "用說的補充"}`;
+  }
+  $("answer").addEventListener("input", micLabel);
+  $("fu-answer").addEventListener("input", micLabel);
+
   function renderQ() {
     const it = cur();
     renderSlots(it);
@@ -286,6 +296,7 @@
     $("b-skip").textContent = it.extra ? "刪除這題" : "跳過";
     const last = state.idx === state.items.length - 1;
     $("b-next").textContent = state.returnToReview ? "回到確認頁" : last ? "看我的回答" : "下一題";
+    micLabel();
   }
   function keep() {
     keepSlots();
@@ -300,9 +311,10 @@
   }
 
   $("b-mic").addEventListener("click", () => {
-    Rec.open({ target: $("answer"), label: cur().question, onText: (t) => {
+    Rec.open({ target: $("answer"), label: cur().question, onText: (t, limit) => {
       const it = cur(); it.voice = true; it.transcript += (it.transcript ? "\n" : "") + t;
-      $("q-status").textContent = "已轉成文字，請檢查並修改不正確的地方。"; keep();
+      $("q-status").textContent = limit ? "已滿 3 分鐘，先轉好這一段。還沒說完可以按「再錄一段接著說」，新的文字會接在後面。" : "已轉成文字，請檢查並修改不正確的地方。";
+      keep(); micLabel();
     } });
   });
   $("b-mic2").addEventListener("click", () => {
