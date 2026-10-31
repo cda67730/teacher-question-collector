@@ -15,7 +15,7 @@
     followups: [], fuAsked: false, followupAnswer: "",
     child: q.child === true ? true : q.child === "ask" ? "ask" : false,   // 這題是否要填孩子資料
     childOn: q.child === true,
-    slots: { ageY: "", ageM: "", lang: "", sits: [], tried: "", notTried: false, result: "" },
+    slots: { ageY: "", ageM: "", sits: [], tried: "", notTried: false, result: "" },
   });
 
   // ---------- 共用 ----------
@@ -220,10 +220,9 @@
   // ---------- 幼兒題的必填資料 ----------
   const S = C.CHILD_SLOTS;
   $("ageM").innerHTML = '<option value="">個月</option>' + Array.from({ length: 12 }, (_, m) => `<option value="${m}">${m} 個月</option>`).join("");
-  $("lang").innerHTML = '<option value="">請選擇</option>' + S.LANGUAGE.map((x) => `<option>${esc(x)}</option>`).join("");
   $("result").innerHTML = '<option value="">請選擇</option>' + S.RESULTS.map((x) => `<option>${esc(x)}</option>`).join("");
   $("sits").innerHTML = S.SITUATIONS.map((x, i) => `<label class="chip"><input type="checkbox" value="${esc(x)}" id="sit${i}"> ${esc(x)}</label>`).join("");
-  const slotsOf = (it) => it.slots || (it.slots = { ageY: "", ageM: "", lang: "", sits: [], tried: "", notTried: false, result: "" });
+  const slotsOf = (it) => it.slots || (it.slots = { ageY: "", ageM: "", sits: [], tried: "", notTried: false, result: "" });
   function renderSlots(it) {
     const show = !!it.child;
     $("slots").hidden = !show;
@@ -232,7 +231,7 @@
     $("childAsk").checked = !!it.childOn;
     $("slotFields").hidden = !it.childOn;
     const s = slotsOf(it);
-    $("ageY").value = s.ageY; $("ageM").value = s.ageM; $("lang").value = s.lang;
+    $("ageY").value = s.ageY; $("ageM").value = s.ageM;
     $("sits").querySelectorAll("input").forEach((x) => (x.checked = s.sits.indexOf(x.value) >= 0));
     $("tried").value = s.tried; $("notTried").checked = s.notTried; $("result").value = s.result;
     syncTried();
@@ -246,7 +245,7 @@
     const it = cur(); if (!it.child) return;
     it.childOn = it.child === true || $("childAsk").checked;
     const s = slotsOf(it);
-    Object.assign(s, { ageY: $("ageY").value, ageM: $("ageM").value, lang: $("lang").value,
+    Object.assign(s, { ageY: $("ageY").value, ageM: $("ageM").value,
       sits: [...$("sits").querySelectorAll("input:checked")].map((x) => x.value),
       tried: $("tried").value.trim(), notTried: $("notTried").checked, result: $("result").value });
   }
@@ -255,7 +254,6 @@
     if (!it.child || !it.childOn) return [];
     const s = slotsOf(it), miss = [];
     if (!s.ageY || (s.ageY !== "1" && s.ageM === "")) miss.push("年齡");
-    if (!s.lang) miss.push("語言狀態");
     if (!s.sits.length) miss.push("發生時段");
     if (!s.notTried && !s.tried) miss.push("已試過的做法（或勾「還沒試過」）");
     if (!s.notTried && s.tried && !s.result) miss.push("試過的結果");
@@ -264,11 +262,11 @@
   function slotText(it) {   // 給追問用：告訴 AI 哪些已經知道
     if (!it.child || !it.childOn) return "";
     const s = slotsOf(it);
-    return `孩子年齡：${ageLabel(s)}；語言：${s.lang}；發生時段：${s.sits.join("、")}；已試做法：${s.notTried ? "還沒試過" : s.tried + "（" + s.result + "）"}`;
+    return `孩子年齡：${ageLabel(s)}；發生時段：${s.sits.join("、")}；已試做法：${s.notTried ? "還沒試過" : s.tried + "（" + s.result + "）"}`;
   }
   function ageLabel(s) { return s.ageY === "1" ? "未滿 2 歲" : s.ageY ? `${s.ageY} 歲 ${s.ageM || 0} 個月` : ""; }
   function ageMonths(s) { return s.ageY === "1" ? "" : s.ageY ? Number(s.ageY) * 12 + Number(s.ageM || 0) : ""; }
-  ["ageY", "ageM", "lang", "result"].forEach((id) => $(id).addEventListener("change", () => { keepSlots(); saveDraft(); }));
+  ["ageY", "ageM", "result"].forEach((id) => $(id).addEventListener("change", () => { keepSlots(); saveDraft(); }));
   $("sits").addEventListener("change", () => { keepSlots(); saveDraft(); });
   $("tried").addEventListener("change", () => { keepSlots(); saveDraft(); });
   $("notTried").addEventListener("change", () => { syncTried(); keepSlots(); saveDraft(); });
@@ -400,7 +398,7 @@
         followups: it.followups, followupAnswer: it.followupAnswer,
         child: !!(it.child && it.childOn),
         slots: it.child && it.childOn ? (() => { const s = slotsOf(it); return {
-          ageMonths: ageMonths(s), ageLabel: ageLabel(s), language: s.lang, situations: s.sits.join("、"),
+          ageMonths: ageMonths(s), ageLabel: ageLabel(s), situations: s.sits.join("、"),
           tried: s.notTried ? "還沒試過" : s.tried, result: s.notTried ? "" : s.result, complete: missingSlots(it).length === 0 }; })() : null,
       };
     }).filter((a) => !(a.skipped && /^ADD/.test(a.qid)));

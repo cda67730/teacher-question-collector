@@ -130,11 +130,11 @@ function submit_(school, bg, answers) {
 }
 
 // 幼兒題的必填資料（填槽）：不是幼兒題的列標「不適用」
-const SLOT_HEAD = ['幼兒月齡', '幼兒年齡', '語言狀態', '發生時段', '已試做法（去識別化）', '試做結果', '資料是否填齊'];
+const SLOT_HEAD = ['幼兒月齡', '幼兒年齡', '發生時段', '已試做法（去識別化）', '試做結果', '資料是否填齊'];
 function slotCols_(a) {
   const s = a.child && a.slots;
-  if (!s) return ['', '', '', '', '', '', a.skipped ? '' : '不適用'];
-  return [s.ageMonths === '' ? '' : Number(s.ageMonths), s.ageLabel || '', s.language || '', s.situations || '',
+  if (!s) return ['', '', '', '', '', a.skipped ? '' : '不適用'];
+  return [s.ageMonths === '' ? '' : Number(s.ageMonths), s.ageLabel || '', s.situations || '',
     s.tried === '還沒試過' ? '還沒試過' : deidentify_(s.tried || ''), s.result || '', s.complete ? '是' : '否'];
 }
 
