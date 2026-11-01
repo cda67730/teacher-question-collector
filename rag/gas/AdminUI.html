@@ -277,7 +277,13 @@ async function docAction(a, id, b) {
   try {
     if (a === 'view') {
       const cs = await run('adminDocChunks', id); const d = D.docs.find(x => x.id === id);
-      $('chunkView').innerHTML = `<h3 style="margin-top:18px">段落：${esc(d.title)}（${cs.length} 段）</h3>` + cs.map(c => `<div class="chunk"><span class="note">#${c.n}${c.page ? '｜第' + esc(c.page) + '頁' : ''}｜${esc(c.status)}</span>\n${esc(c.text)}</div>`).join('');
+      const TYPES = ['具體做法', '案例', '溝通範例', '原則／背景', '轉介資訊'];
+      const untyped = cs.filter(c => !c.type).length;
+      $('chunkView').innerHTML = `<h3 style="margin-top:18px">段落：${esc(d.title)}（${cs.length} 段）</h3>` +
+        `<p class="row note">段落類型用來限制「原則／背景」的比例，讓回答以具體做法為主。${untyped ? `<button class="btn" id="classifyDoc">AI 補分類（${untyped} 段未分類）</button>` : ''}</p>` +
+        cs.map(c => `<div class="chunk"><span class="note">#${c.n}${c.page ? '｜第' + esc(c.page) + '頁' : ''}｜${esc(c.status)}｜類型 <select data-ct="${esc(c.id)}" style="width:auto;padding:2px 6px"><option value="">未分類</option>${TYPES.map(t => `<option ${t === c.type ? 'selected' : ''}>${t}</option>`).join('')}</select></span>\n${esc(c.text)}</div>`).join('');
+      $('chunkView').querySelectorAll('[data-ct]').forEach(sel => sel.onchange = async () => { try { await run('adminSetChunkType', sel.dataset.ct, sel.value); toast('已更新類型'); } catch (e) { toast(e.message, 4000); } });
+      const cb = $('classifyDoc'); if (cb) cb.onclick = async () => { cb.disabled = true; cb.textContent = '分類中…'; try { const r = await run('adminClassifyDoc', id); toast(`已分類 ${r.done}／${r.total} 段`); docAction('view', id, b); } catch (e) { toast(e.message, 4000); cb.disabled = false; } };
       $('chunkView').scrollIntoView();
     } else { await run('adminSetDocStatus', id, a); toast('已設為「' + a + '」'); D = await run('adminLoad'); renderDocs(); }
   } catch (e) { toast('失敗：' + e.message, 5000); } finally { b.disabled = false; }

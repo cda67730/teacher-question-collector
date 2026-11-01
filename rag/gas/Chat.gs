@@ -30,7 +30,8 @@ function triagePrompt_(prevTeacher, latest, topics, categories) {
     '- in_scope：是否屬於服務範圍\n' +
     '- info_enough：整個個案的資訊是否足夠\n' +
     '- missing：缺少的關鍵資訊（最多 2 項）\n' +
-    '格式：{"intent":"新個案","referral":{"category":"none","level":"none","reason":""},"topics":[],"in_scope":true,"info_enough":true,"missing":[]}\n\n' +
+    '- focus：用一句話寫出老師「這一則」真正想要的東西（例如「收玩具時不再丟積木的具體做法」「怎麼跟家長開口」），補充或回答追問時寫整個個案目前要解決的事\n' +
+    '格式：{"intent":"新個案","focus":"","referral":{"category":"none","level":"none","reason":""},"topics":[],"in_scope":true,"info_enough":true,"missing":[]}\n\n' +
     (prevTeacher.length ? '老師先前說過（已去識別化）：\n' + prevTeacher.join('\n') + '\n\n' : '') +
     '老師這一則訊息：\n' + latest;
 }
@@ -118,12 +119,18 @@ function runChat_(req, opts) {
   T('P05 Skill 載入', pick.map(s => ({ name: s.name, version: s.version, always: s.always })), 'skills');
 
   // 4. P06 檢索
-  const sd = searchDetail_(qvec, caseText, exp.concepts);
-  const hits = sd.hits;
-  metrics.retrieved = hits.length; metrics.top = sd.cands.length ? sd.cands[0].score : 0;
+  const focus = str_(tri.focus) || d.text;
+  const poolSize = Math.max(Number(C.rerank_pool || 12), Number(C.top_k || 6));
+  const sd = searchDetail_(qvec, caseText, exp.concepts, null, poolSize);
+  metrics.top = sd.cands.length ? sd.cands[0].score : 0;
   T('P06 檢索', { minScore: sd.minScore, topK: sd.topK, total: sd.total, cands: sd.cands }, 'retrieval');
-  if (!hits.length && mode === 'full') {
-    T('P10 降級', '沒有可用知識 → 保守回答');
+  const rr = rerankSelect_(focus, caseText, sd.hits, C);
+  const hits = rr.hits;
+  sd.cands.forEach(c => { c.ref = (hits.find(h => h.id === c.id) || {}).ref || ''; });   // 檢索明細改用最後的 K 編號
+  metrics.retrieved = hits.length; metrics.actionable = rr.actionable; metrics.direct = rr.direct;
+  if (sd.hits.length) T('重新排序與配額', rr.trace, 'rerank');
+  if (mode === 'full' && (!hits.length || !rr.direct)) {
+    T('P10 降級', hits.length ? '沒有能直接回答焦點的段落（只有背景或原則）→ 保守回答，記為知識缺口' : '沒有可用知識 → 保守回答');
     return finish({ type: 'conservative', message: conservativeMsg_(refTable), sources: [] });
   }
 
@@ -133,12 +140,12 @@ function runChat_(req, opts) {
   let ans, chk, rewritten = false;
   for (let attempt = 0; attempt < 2; attempt++) {
     const prompt = mode === 'full'
-      ? assemble_(sysPrompt, skillText, tri, caseText, hits, ctxHistory, ref, refWho, attempt ? chk.reasons : null)
-      : assembleContinue_(sysPrompt, skillText, tri, prevTeacher, d.text, hits, ctxHistory, ref, refWho, intent, attempt ? chk.reasons : null);
+      ? assemble_(sysPrompt, skillText, tri, caseText, hits, ctxHistory, ref, refWho, attempt ? chk.reasons : null, focus)
+      : assembleContinue_(sysPrompt, skillText, tri, prevTeacher, d.text, hits, ctxHistory, ref, refWho, intent, attempt ? chk.reasons : null, focus);
     if (attempt === 0) T('P07 Prompt 組裝', { summary: (mode === 'full' ? '完整回答' : '延續回覆') + '｜固定 system prompt ' + sysPrompt.length + ' 字｜Skill ' + skillText.length + ' 字｜知識 ' + hits.length + ' 段｜歷史 ' + ctxHistory.length + ' 則｜共 ' + prompt.length + ' 字', prompt: prompt }, 'prompt');
     ans = cleanAnswer_(genJson_(C.model_answer, prompt, { temperature: Number(C.temperature || 0.3) }));
     T(attempt ? 'A1 重寫' : 'A1 生成', '策略 ' + (ans.strategies || []).length + ' 個');
-    chk = checks_(caseText, ans, hits, C, range);
+    chk = checks_(caseText, ans, hits, C, range, focus);
     T('檢查', chk.items, 'checks');
     if (chk.pass) break;
     rewritten = true;
@@ -186,7 +193,7 @@ function continueOptions_() {
 }
 
 /** 延續回覆：已經給過完整建議，這次只回應新的內容或老師要的那件事 */
-function assembleContinue_(sys, skillText, tri, prevTeacher, latest, hits, history, ref, refWho, intent, feedback) {
+function assembleContinue_(sys, skillText, tri, prevTeacher, latest, hits, history, ref, refWho, intent, feedback, focus) {
   const forbiddenWords = forbidden_().filter(f => !f.regex).map(f => f.rule);
   const hist = history.map(h => (h.role === 'teacher' ? '老師：' : '助手：') + h.text).join('\n');
   const kn = hits.map(h => h.ref + '｜' + h.title + (h.page ? '（第' + h.page + '頁）' : '') + '\n' + h.text).join('\n\n');
@@ -194,7 +201,7 @@ function assembleContinue_(sys, skillText, tri, prevTeacher, latest, hits, histo
     '【1 固定 system prompt】\n' + sys,
     '【2 主題 Skill】\n' + skillText,
     '【3 對話到目前為止】\n' + (hist || '（無）'),
-    '【4 老師這次說的】（' + intent + '）\n' + latest,
+    '【4 老師這次說的】（' + intent + '）\n' + latest + (focus ? '\n老師想要的：' + focus : ''),
     kn ? '【5 檢索到的知識（只能引用這些，編號 K1…）】\n' + kn : '【5 檢索到的知識】這次沒有找到新的相關知識，不要給新的策略。',
     '【延續回覆的做法】\n' + text_('continue_prompt') + '\n可提供的下一步選項（挑 2–4 個最適合的，可改寫成符合情境的說法）：\n' + continueOptions_().map(o => '- ' + o).join('\n'),
     feedback ? '【重寫指示】上一版沒有通過檢查：' + feedback.join('；') + '。請修正後重寫。' : '',
@@ -205,14 +212,15 @@ function assembleContinue_(sys, skillText, tri, prevTeacher, latest, hits, histo
   ].filter(Boolean).join('\n\n');
 }
 
-function assemble_(sys, skillText, tri, caseText, hits, history, ref, refWho, feedback) {
+function assemble_(sys, skillText, tri, caseText, hits, history, ref, refWho, feedback, focus) {
   const forbiddenWords = forbidden_().filter(f => !f.regex).map(f => f.rule);
   const hist = history.map(h => (h.role === 'teacher' ? '老師：' : '助手：') + h.text).join('\n');
   const kn = hits.map(h => h.ref + '｜' + h.title + (h.page ? '（第' + h.page + '頁）' : '') + '\n' + h.text).join('\n\n');
   return [
     '【1 固定 system prompt】\n' + sys,
     '【2 主題 Skill】\n' + skillText,
-    '【3 情境資訊】\n分流結果：' + JSON.stringify(tri) + '\n老師原話（已去識別化）：\n' + caseText,
+    '【3 情境資訊】\n分流結果：' + JSON.stringify(tri) + '\n老師原話（已去識別化）：\n' + caseText +
+      (focus ? '\n\n【老師這次想要的】' + focus + '\n回答要先直接回應這一點；策略要具體到這個孩子與情境（做什麼、什麼時候、怎麼說），不要只寫一般原則。' : ''),
     '【4 檢索到的知識（只能引用這些，編號 K1…）】\n' + kn,
     hist ? '【5 對話歷史】\n' + hist : '',
     feedback ? '【重寫指示】上一版沒有通過檢查：' + feedback.join('；') + '。請修正後重寫。' : '',
@@ -224,7 +232,7 @@ function assemble_(sys, skillText, tri, caseText, hits, history, ref, refWho, fe
 }
 
 // ---------- 檢查：P08 規則、P09 出處、L5 依據與轉介 ----------
-function checks_(caseText, ans, hits, C, range) {
+function checks_(caseText, ans, hits, C, range, focus) {
   range = range || [2, 3];
   const items = [], reasons = [];
   const s = JSON.stringify(ans);
@@ -237,24 +245,36 @@ function checks_(caseText, ans, hits, C, range) {
   st.forEach(x => { if (!(x.refs || []).length) p9.push('「' + x.title + '」沒有出處'); (x.refs || []).forEach(r => { if (!ok[r]) p9.push(r + ' 不在檢索結果中'); }); });
   items.push({ name: 'P09 出處核對', pass: !p9.length, note: p9.join('；') || (st.length ? '每條建議都有出處' : '沒有新策略') });
   reasons.push.apply(reasons, p9);
-  if (truthy_(C.enable_llm_check)) {
+  // L5 依據與轉介（可關閉）＋回應度（可另外關閉）；兩者合併為一次 AI 呼叫
+  const doL5 = truthy_(C.enable_llm_check);
+  const doRel = !!focus && truthy_(C.enable_relevance_check == null || C.enable_relevance_check === '' ? true : C.enable_relevance_check);
+  if (doL5 || doRel) {
     try {
       const kn = hits.map(h => h.ref + '：' + h.text).join('\n');
-      // 檢查標準在「設定」的 check_prompt，這裡只放輸出格式
-      const l5 = genJson_(C.model_check, '你是學前融合教育 AI 回答的審查器，只輸出 JSON。\n' + text_('check_prompt') + '\n' +
-        '每個問題的 severe：符合上面「嚴重」的定義為 true，其他為 false。\n' +
-        '格式：{"issues":[{"type":"依據|轉介|語氣","severe":false,"note":"一句話說明問題"}]}，沒有問題就回 {"issues":[]}\n\n' +
-        '老師描述：\n' + caseText + '\n\n知識：\n' + kn + '\n\n回答：\n' + s, { temperature: 0, noThink: true });
-      // 模型可能回字串或物件，一律轉成「類型：說明」文字
-      const issues = (l5.issues || []).map(x => typeof x === 'string' ? { type: '', severe: true, note: x }
-        : { type: x.type || '', severe: x.severe !== false, note: x.note || x.issue || x.reason || x.description || JSON.stringify(x) });
-      const severe = issues.filter(i => i.severe);
-      const txt = i => (i.type ? i.type + '：' : '') + i.note;
-      const pass = !severe.length;
-      items.push({ name: 'L5 依據與轉介', pass: pass,
-        note: !issues.length ? '有依據、無遺漏轉介' : (pass ? '小問題（不擋）：' : '') + issues.map(i => (i.severe ? '【嚴重】' : '') + txt(i)).join('；') });
-      if (!pass) reasons.push.apply(reasons, severe.length ? severe.map(txt) : ['依據或轉介有問題']);
-    } catch (e) { items.push({ name: 'L5 依據與轉介', pass: true, note: '檢查未完成（略過）：' + e.message }); }
+      const l5 = genJson_(C.model_check, '你是學前融合教育 AI 回答的審查器，只輸出 JSON。\n' +
+        (doL5 ? text_('check_prompt') + '\n每個問題的 severe：符合上面「嚴重」的定義為 true，其他為 false。\n' : '') +
+        (doRel ? '另外判斷回應度：回答是否直接回應「老師想要的」，策略是否具體到這個孩子與情境（不是只有一般原則）。addressed 為 true／false，note 說明缺了什麼。\n' : '') +
+        '格式：{' + (doL5 ? '"issues":[{"type":"依據|轉介|語氣","severe":false,"note":"一句話說明問題"}]' : '') + (doL5 && doRel ? ',' : '') +
+        (doRel ? '"relevance":{"addressed":true,"note":""}' : '') + '}' + (doL5 ? '，沒有問題時 issues 為空陣列' : '') + '\n\n' +
+        (doRel ? '老師想要的：' + focus + '\n\n' : '') + '老師描述：\n' + caseText + '\n\n知識：\n' + kn + '\n\n回答：\n' + s, { temperature: 0, noThink: true });
+      if (doL5) {
+        // 模型可能回字串或物件，一律轉成「類型：說明」文字
+        const issues = (l5.issues || []).map(x => typeof x === 'string' ? { type: '', severe: true, note: x }
+          : { type: x.type || '', severe: x.severe !== false, note: x.note || x.issue || x.reason || x.description || JSON.stringify(x) });
+        const severe = issues.filter(i => i.severe);
+        const txt = i => (i.type ? i.type + '：' : '') + i.note;
+        const pass = !severe.length;
+        items.push({ name: 'L5 依據與轉介', pass: pass,
+          note: !issues.length ? '有依據、無遺漏轉介' : (pass ? '小問題（不擋）：' : '') + issues.map(i => (i.severe ? '【嚴重】' : '') + txt(i)).join('；') });
+        if (!pass) reasons.push.apply(reasons, severe.length ? severe.map(txt) : ['依據或轉介有問題']);
+      }
+      if (doRel) {
+        const rel = l5.relevance || {};
+        const ok2 = rel.addressed !== false;
+        items.push({ name: '回應度', pass: ok2, note: ok2 ? '有直接回應：' + focus : '【嚴重】沒有回應到「' + focus + '」' + (rel.note ? '：' + str_(rel.note) : '') });
+        if (!ok2) reasons.push('沒有直接回應老師想要的「' + focus + '」' + (rel.note ? '（' + str_(rel.note) + '）' : '') + '，請先直接回應這一點，策略要具體');
+      }
+    } catch (e) { items.push({ name: doL5 ? 'L5 依據與轉介' : '回應度', pass: true, note: '檢查未完成（略過）：' + e.message }); }
   }
   return { pass: items.every(i => i.pass), items: items, reasons: reasons };
 }

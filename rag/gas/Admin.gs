@@ -76,7 +76,27 @@ function adminUploadDoc(p) {
 }
 function adminDocChunks(docId) {
   requireAdmin_();
-  return rows_('chunks').filter(r => String(r['文件ID']) === String(docId)).map(r => ({ id: r['段落ID'], n: r['序號'], page: r['頁碼'], text: r['內容'], status: r['狀態'] }));
+  return rows_('chunks').filter(r => String(r['文件ID']) === String(docId)).map(r => ({ id: r['段落ID'], n: r['序號'], page: r['頁碼'], text: r['內容'], status: r['狀態'], type: String(r['類型'] || '') }));
+}
+/** 修改單一段落的類型 */
+function adminSetChunkType(chunkId, type) {
+  requireAdmin_();
+  if (type && CHUNK_TYPES.indexOf(type) < 0) throw new Error('類型不正確');
+  const s = sh_('chunks'); const head = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
+  const ti = head.indexOf('類型'); if (ti < 0) throw new Error('「知識段落」缺少「類型」欄，請先執行 setup()');
+  const r = rows_('chunks').find(x => String(x['段落ID']) === String(chunkId)); if (!r) throw new Error('找不到段落');
+  s.getRange(r._row, ti + 1).setValue(type || '');
+  return true;
+}
+/** 對一份文件中還沒有類型的段落做 AI 分類（舊文件補分類用） */
+function adminClassifyDoc(docId) {
+  requireAdmin_();
+  const s = sh_('chunks'); const head = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
+  const ti = head.indexOf('類型'); if (ti < 0) throw new Error('「知識段落」缺少「類型」欄，請先執行 setup()');
+  const todo = rows_('chunks').filter(r => String(r['文件ID']) === String(docId) && !String(r['類型'] || ''));
+  const types = classifyChunks_(todo.map(r => String(r['內容'])));
+  todo.forEach((r, i) => { if (types[i]) s.getRange(r._row, ti + 1).setValue(types[i]); });
+  return { total: todo.length, done: types.filter(Boolean).length };
 }
 function adminSetDocStatus(docId, status) {
   const me = requireAdmin_();

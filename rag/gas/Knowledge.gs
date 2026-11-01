@@ -43,6 +43,24 @@ function chunkText_(text, size, overlap) {
   return out;
 }
 
+// ---------- 段落類型：用來限制「原則／背景」這類後設知識的比例 ----------
+const CHUNK_TYPES = ['具體做法', '案例', '溝通範例', '原則／背景', '轉介資訊'];
+const ACTIONABLE = ['具體做法', '案例', '溝通範例'];
+/** AI 分類段落類型；失敗的留空（視為未分類，不受配額限制） */
+function classifyChunks_(texts) {
+  const out = texts.map(() => '');
+  for (let i = 0; i < texts.length; i += 25) {
+    const group = texts.slice(i, i + 25);
+    try {
+      const r = genJson_(cfg_('model_triage'), '把每一段幼教知識分成一種類型，只輸出 JSON 陣列，順序與段落相同。類型：' + JSON.stringify(CHUNK_TYPES) +
+        '。具體做法＝老師可以直接照做的步驟或策略；案例＝具體情境的處理實例；溝通範例＝可直接使用的說法或訊息；原則／背景＝理論、原則、概念說明；轉介資訊＝找誰、流程、資源。\n' +
+        '格式：["具體做法","原則／背景",…]\n\n' + group.map((t, j) => '【段落' + (j + 1) + '】\n' + String(t).slice(0, 700)).join('\n\n'), { temperature: 0, noThink: true });
+      (Array.isArray(r) ? r : (r.types || [])).forEach((t, j) => { if (CHUNK_TYPES.indexOf(t) >= 0) out[i + j] = t; });
+    } catch (e) { console.warn('分類失敗', e); }
+  }
+  return out;
+}
+
 // ---------- 新增文件：轉文字 → 切段 → 向量 → 寫入（狀態：待審核） ----------
 function addDocument_(meta, text, user) {
   if (!String(text || '').trim()) throw new Error('沒有讀到任何文字');
@@ -50,7 +68,8 @@ function addDocument_(meta, text, user) {
   const chunks = chunkText_(text);
   const vecs = embedTexts_(chunks.map(c => (meta.title ? meta.title + '\n' : '') + c.text), 'RETRIEVAL_DOCUMENT');
   const now = new Date();
-  append_('chunks', chunks.map((c, i) => [docId + '-' + String(i + 1).padStart(3, '0'), docId, i + 1, c.text, c.page || '', quant_(vecs[i]), '待審核']));
+  const types = classifyChunks_(chunks.map(c => c.text));
+  append_('chunks', chunks.map((c, i) => [docId + '-' + String(i + 1).padStart(3, '0'), docId, i + 1, c.text, c.page || '', quant_(vecs[i]), '待審核', types[i]]));
   append_('docs', [[docId, meta.title || '', meta.source || '', meta.evidence || '', meta.fileName || '', chunks.length, '待審核', user || '', now, '', '']]);
   return { docId: docId, chunks: chunks.length };
 }
@@ -86,16 +105,16 @@ function loadIndex_() {
   const I = n => h.indexOf(n);
   return v.filter(r => r[I('狀態')] === '已核可' && r[I('向量')]).map(r => ({
     id: String(r[I('段落ID')]), docId: String(r[I('文件ID')]), text: String(r[I('內容')]), page: String(r[I('頁碼')] || ''),
-    vec: dequant_(String(r[I('向量')])), doc: docs[String(r[I('文件ID')])] || {},
+    vec: dequant_(String(r[I('向量')])), doc: docs[String(r[I('文件ID')])] || {}, type: I('類型') >= 0 ? String(r[I('類型')] || '') : '',
   }));
 }
 
 /** 檢索明細：回傳門檻、前 10 名候選（含未達門檻者）與最後採用的段落；觀測面板與命中率測試共用 */
-function searchDetail_(qvec, rawText, concepts, k) {
+function searchDetail_(qvec, rawText, concepts, k, pool) {
   const q = normVec_(qvec).map(x => Math.round(x * 127));
   const keys = Array.from(new Set((concepts || []).concat(String(rawText).match(/[一-鿿]{2,4}/g) || []))).slice(0, 30);
   const minScore = Number(cfg_('min_score') || 0.45);
-  const topK = k || Number(cfg_('top_k') || 6);
+  const topK = pool || k || Number(cfg_('top_k') || 6);
   const scored = loadIndex_().map(c => {
     let dot = 0; const v = c.vec;
     for (let i = 0; i < q.length && i < v.length; i++) dot += q[i] * v[i];
@@ -105,12 +124,55 @@ function searchDetail_(qvec, rawText, concepts, k) {
   }).sort((a, b) => b.score - a.score);
   const r3 = x => Math.round(x * 1000) / 1000;
   const hits = scored.filter(x => x.score >= minScore).slice(0, topK)
-    .map((x, i) => ({ ref: 'K' + (i + 1), id: x.c.id, docId: x.c.docId, title: x.c.doc.title, source: x.c.doc.source, evidence: x.c.doc.evidence, page: x.c.page, text: x.c.text, score: r3(x.score) }));
+    .map((x, i) => ({ ref: 'K' + (i + 1), id: x.c.id, docId: x.c.docId, title: x.c.doc.title, source: x.c.doc.source, evidence: x.c.doc.evidence, page: x.c.page, text: x.c.text, score: r3(x.score), type: x.c.type }));
   const refOf = {}; hits.forEach(h => refOf[h.id] = h.ref);
   const cands = scored.slice(0, 10).map((x, i) => ({ rank: i + 1, ref: refOf[x.c.id] || '', id: x.c.id, docId: x.c.docId, title: x.c.doc.title, page: x.c.page,
-    score: r3(x.score), vec: r3(x.vec), kw: x.kw, pass: !!refOf[x.c.id], text: x.c.text.slice(0, 300) }));
+    score: r3(x.score), vec: r3(x.vec), kw: x.kw, pass: !!refOf[x.c.id], text: x.c.text.slice(0, 300), type: x.c.type }));
   return { minScore: minScore, topK: topK, total: scored.length, cands: cands, hits: hits };
 }
 
 /** qvec 為查詢向量（未壓縮）；回傳前 k 段 */
 function search_(qvec, rawText, concepts, k) { return searchDetail_(qvec, rawText, concepts, k).hits; }
+
+// ---------- 重新排序與配額：以「能不能回答提問焦點」排序，限制後設知識比例 ----------
+/**
+ * pool：向量檢索的候選（已過門檻）；回傳最後採用的段落（重新編號 K1…）與給觀測面板的明細
+ * 分數：3 直接回答焦點、2 部分回答、1 只是背景相關、0 無關（0 分不採用）
+ */
+function rerankSelect_(focus, caseText, pool, C) {
+  const topK = Number(C.top_k || 6), minAct = Number(C.quota_min_actionable == null || C.quota_min_actionable === '' ? 3 : C.quota_min_actionable);
+  const maxPri = Number(C.quota_max_principle == null || C.quota_max_principle === '' ? 2 : C.quota_max_principle);
+  let scores = pool.map(() => null), used = false;
+  if (pool.length && truthy_(C.enable_rerank == null || C.enable_rerank === '' ? true : C.enable_rerank)) {
+    try {
+      const r = genJson_(C.model_check || C.model_triage, '你在替幼教老師的提問挑選參考資料，只輸出 JSON。\n' +
+        '老師這次想要的（提問焦點）：' + focus + '\n老師的描述：' + String(caseText).slice(0, 1500) + '\n\n' +
+        '為每段資料打分：3＝能直接回答焦點（有具體可用的做法）、2＝部分回答、1＝只是相關背景或一般原則、0＝無關。\n' +
+        '格式：{"scores":[3,1,…]}，順序與段落相同。\n\n' + pool.map((h, i) => '【' + (i + 1) + '】' + (h.type ? '（' + h.type + '）' : '') + h.text.slice(0, 600)).join('\n\n'),
+        { temperature: 0, noThink: true });
+      const arr = Array.isArray(r) ? r : (r.scores || []);
+      scores = pool.map((_, i) => { const v = Number(arr[i]); return arr[i] == null || isNaN(v) ? null : Math.max(0, Math.min(3, v)); });
+      used = scores.some(v => v != null);          // 讀不出分數就退回向量順序
+      if (!used) scores = pool.map(() => null);
+    } catch (e) { console.warn('重新排序失敗，改用向量順序', e); }
+  }
+  const items = pool.map((h, i) => ({ h: h, s: scores[i], i: i }));
+  // 排序：重排分數高者優先，同分看向量分數；沒有重排分數時照向量順序
+  const order = items.filter(x => x.s == null || x.s > 0).sort((a, b) => (b.s == null ? 1.5 : b.s) - (a.s == null ? 1.5 : a.s) || b.h.score - a.h.score);
+  const pick = [], isAct = x => ACTIONABLE.indexOf(x.h.type) >= 0, isPri = x => x.h.type === '原則／背景';
+  order.filter(isAct).slice(0, Math.min(minAct, topK)).forEach(x => pick.push(x));               // 先保留具體做法的名額
+  order.forEach(x => {
+    if (pick.length >= topK || pick.indexOf(x) >= 0) return;
+    if (isPri(x) && pick.filter(isPri).length >= maxPri) return;                                   // 原則／背景最多 maxPri 段
+    pick.push(x);
+  });
+  pick.sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  const hits = pick.map((x, n) => Object.assign({}, x.h, { ref: 'K' + (n + 1), rerank: x.s }));
+  const direct = used ? pick.filter(x => x.s >= 2).length : pick.length;
+  return {
+    hits: hits, direct: direct, actionable: pick.filter(isAct).length,
+    trace: { used: used, focus: focus, topK: topK, minAct: minAct, maxPri: maxPri,
+      items: items.map(x => ({ id: x.h.id, title: x.h.title, page: x.h.page, type: x.h.type || '', vec: x.h.score, rerank: x.s,
+        ref: (hits.find(h => h.id === x.h.id) || {}).ref || '', text: x.h.text.slice(0, 200) })) },
+  };
+}
