@@ -66,6 +66,7 @@ const TEXT_DEFAULTS = {
   continue_options: ['幫我寫一段給家長的訊息', '給我接下來的觀察記錄重點', '換一個不同的做法', '這個情況需要找誰協助？'].join('\n'),
   msg_no_knowledge: '謝謝你說出這個狀況。目前知識庫裡沒有足夠、經過檢查的內容可以給你具體建議。建議先和{who}討論，也可以申請特教巡迴輔導老師協助。',
   msg_check_failed: '謝謝你說出這個狀況。我整理出的建議沒有通過依據檢查，為了避免給你不夠可靠的內容，這次先不提供具體做法。建議先和{who}討論，也可以申請特教巡迴輔導老師協助。',
+  msg_ai_fallback: '目前知識庫內容不足，以下由 AI 協助補足，尚未經專家審核，請斟酌使用；必要時請和園長或特教巡迴輔導老師確認。',
   msg_out_of_scope: '這個問題超出幼兒園教保現場的範圍，建議洽詢相關專業人員。如果是班上孩子的狀況，歡迎描述你看到的情境。',
 };
 /** 讀文字設定；設定表沒有這一項時用預設值 */
@@ -90,6 +91,7 @@ const SETTINGS_DEFAULT = [
     ['chunk_overlap', 80, '段落重疊（字）'],
     ['max_followups', 1, '最多追問幾輪'],
     ['enable_llm_check', true, '是否啟用 L5 依據與轉介檢查'],
+    ['knowledge_only', true, '只用知識庫回答：開＝知識不足時保守回答；關＝知識不足時由 AI 協助補足（照樣檢查，並標示「知識庫內容不足」）'],
     ['enable_relevance_check', true, '是否檢查回答有沒有直接回應老師的提問焦點（L5 關閉時也可單獨啟用）'],
     ['enable_rerank', true, '是否用 AI 依「能不能回答提問焦點」重新排序檢索結果（每題多一次 AI 呼叫）'],
     ['rerank_pool', 12, '重新排序前先取幾段候選'],
@@ -106,6 +108,7 @@ const SETTINGS_DEFAULT = [
     ['continue_options', TEXT_DEFAULTS.continue_options, '延續回覆提供的下一步選項（一行一個，AI 會挑適合的）'],
     ['msg_no_knowledge', TEXT_DEFAULTS.msg_no_knowledge, '知識庫查不到資料時的回覆；{who} 會換成轉介資源「系統能力不足」的對象'],
     ['msg_check_failed', TEXT_DEFAULTS.msg_check_failed, '回答沒通過檢查時的回覆；{who} 同上'],
+    ['msg_ai_fallback', TEXT_DEFAULTS.msg_ai_fallback, '知識不足、由 AI 補足時，放在回答最上方的提醒'],
     ['msg_out_of_scope', TEXT_DEFAULTS.msg_out_of_scope, '超出服務範圍時的回覆'],
 ];
 

@@ -144,7 +144,7 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
     <h3 style="margin:0">對話紀錄與指標</h3>
     <select id="lDays" style="width:auto"><option value="1">今天起 24 小時</option><option value="7" selected>最近 7 天</option><option value="30">最近 30 天</option><option value="0">全部</option></select>
     <select id="lSchool" style="width:auto"><option value="">全部園所</option></select>
-    <select id="lType" style="width:auto"><option value="">全部類型</option><option value="answer">回答</option><option value="continue">延續</option><option value="followup">追問</option><option value="referral">緊急轉介</option><option value="conservative">保守回答</option><option value="out_of_scope">超出範圍</option></select>
+    <select id="lType" style="width:auto"><option value="">全部類型</option><option value="answer">回答</option><option value="ai_fallback">AI 補足</option><option value="continue">延續</option><option value="followup">追問</option><option value="referral">緊急轉介</option><option value="conservative">保守回答</option><option value="out_of_scope">超出範圍</option></select>
     <input type="text" id="lQ" placeholder="搜尋老師訊息" style="width:180px">
     <label style="font-weight:400;margin:0"><input type="checkbox" id="lTest"> 含後台測試</label>
     <button class="btn" id="lLoad">重新整理</button>
@@ -320,8 +320,8 @@ function renderReply(r) {
     if ((a.options || []).length) h += '\n\n' + a.options.map(o => `<button class="btn opt" data-opt="${esc(o)}">${esc(o)}</button>`).join(' ');
     return h;
   }
-  if (r.type !== 'answer') return esc(r.message || '');
-  const a = r.answer; let h = esc(restore(a.empathy)) + '\n\n<b>看見與理解</b>\n' + esc(restore(a.understanding)) + '\n\n<b>現在可以試試</b>\n' +
+  if (r.type !== 'answer' && r.type !== 'ai_fallback') return esc(r.message || '');
+  const a = r.answer; let h = (a.notice ? '<b style="color:#a86a12">⚠ ' + esc(a.notice) + '</b>\n\n' : '') + esc(restore(a.empathy)) + '\n\n<b>看見與理解</b>\n' + esc(restore(a.understanding)) + '\n\n<b>現在可以試試</b>\n' +
     (a.strategies || []).map((s, i) => `${i + 1}. ${esc(restore(s.title))}：${esc(restore(s.how))} [${(s.refs || []).join(',')}]`).join('\n');
   if (a.parent_message) h += '\n\n<b>給家長的訊息草稿</b>\n' + esc(restore(a.parent_message));
   if ((a.observe || []).length) h += '\n\n<b>接下來觀察</b>\n' + a.observe.map(o => '・' + esc(restore(o))).join('\n');
@@ -332,7 +332,7 @@ function renderReply(r) {
 }
 function botSummary(r) {
   const a = r.answer || {};
-  if (r.type === 'answer') return [a.empathy, '建議：' + (a.strategies || []).map(s => s.title).join('、')].filter(Boolean).join(' ');
+  if (r.type === 'answer' || r.type === 'ai_fallback') return [a.empathy, '建議：' + (a.strategies || []).map(s => s.title).join('、')].filter(Boolean).join(' ');
   if (r.type === 'continue') return [a.reply, (a.strategies || []).length ? '新建議：' + a.strategies.map(s => s.title).join('、') : '', a.parent_message ? '（已提供家長訊息）' : ''].filter(Boolean).join(' ');
   if (r.type === 'followup') return r.questions.join(' ');
   return r.message || '';
@@ -358,7 +358,7 @@ $('tSend').onclick = async () => {
 $('resetTest').onclick = () => { T = { history: [], nameMap: {}, followups: 0, answered: 0, turn: 0, session: 'admin-test-' + Date.now() }; $('tMsgs').innerHTML = ''; $('tTrace').innerHTML = ''; };
 
 // ---------- 對話紀錄 ----------
-const TN = { answer: '回答', continue: '延續', followup: '追問', referral: '緊急轉介', conservative: '保守回答', out_of_scope: '超出範圍' };
+const TN = { answer: '回答', ai_fallback: 'AI 補足', continue: '延續', followup: '追問', referral: '緊急轉介', conservative: '保守回答', out_of_scope: '超出範圍' };
 let L = null, logsLoaded = false;
 const k = (v, label, sub, cls) => `<div class="kpi"><b class="${cls || ''}">${v == null ? '—' : esc(v)}</b><span>${esc(label)}</span>${sub ? `<small>${esc(sub)}</small>` : ''}</div>`;
 async function loadLogs() {

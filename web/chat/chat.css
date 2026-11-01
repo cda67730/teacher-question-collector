@@ -51,3 +51,6 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 @media (min-width:1100px){.scrim{display:none}body.drawer-on .app{margin-right:480px}}
 .opts{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 .opt{font-size:14px;padding:6px 12px;border-color:var(--accent);color:var(--accent);border-radius:999px;background:transparent}
+.notice{background:#fff4e0;border:1px solid #e8b45c;color:#6b4a0f;border-radius:8px;padding:8px 10px;font-size:14px;margin-bottom:10px}
+@media (prefers-color-scheme:dark){.notice{background:#3a2c12;border-color:#a87a2a;color:#f0d29a}}
+.ai-tag{font-size:11px;border:1px solid #c98a1c;color:#a8700f;border-radius:6px;padding:0 6px;margin-left:4px}

@@ -113,7 +113,7 @@ function adminTestChat(req) {
 }
 
 // ---------- 對話紀錄觀測 ----------
-const LOG_TYPE_NAME = { answer: '回答', continue: '延續', followup: '追問', referral: '緊急轉介', conservative: '保守回答', out_of_scope: '超出範圍' };
+const LOG_TYPE_NAME = { answer: '回答', ai_fallback: 'AI 補足', continue: '延續', followup: '追問', referral: '緊急轉介', conservative: '保守回答', out_of_scope: '超出範圍' };
 function jsonOr_(s, d) { try { return JSON.parse(s); } catch (e) { return d; } }
 function feedbackMap_() {
   const fb = {};
@@ -161,7 +161,7 @@ function adminLogs(opts) {
   const pct = (a, b) => b ? Math.round(a / b * 1000) / 10 : null;
   const byType = {}; rows.forEach(r => byType[r.type] = (byType[r.type] || 0) + 1);
   const ups = rows.filter(r => r.fb === 'up').length, downs = rows.filter(r => r.fb === 'down').length;
-  const answered = rows.filter(r => r.type === 'answer' || r.type === 'continue');
+  const answered = rows.filter(r => r.type === 'answer' || r.type === 'continue' || r.type === 'ai_fallback');
   const stats = {
     turns: rows.length,
     sessions: new Set(rows.map(r => r.session)).size,
@@ -176,7 +176,7 @@ function adminLogs(opts) {
     avgMs: rows.length ? Math.round(sum(rows, r => r.ms || 0) / rows.length) : null,
   };
   // 知識缺口：走到檢索卻沒有命中，或最後只能保守回答的問題 → 交給專家補資料
-  const gaps = rows.filter(r => r.retrieved === 0 || r.type === 'conservative').slice(-30).reverse()
+  const gaps = rows.filter(r => r.retrieved === 0 || r.type === 'conservative' || r.type === 'ai_fallback').slice(-30).reverse()
     .map(r => ({ row: r.row, time: r.time, msg: r.msg, top: r.top }));
   // 常被引用的文件
   const docCount = {};

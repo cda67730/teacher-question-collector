@@ -4,7 +4,7 @@
  */
 (function () {
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  const TYPE = { answer: ["回答", "ok"], continue: ["延續回覆", "ok"], followup: ["追問", "info"], referral: ["緊急轉介", "crit"], conservative: ["保守回答", "warn"], out_of_scope: ["超出範圍", "muted"] };
+  const TYPE = { answer: ["回答", "ok"], continue: ["延續回覆", "ok"], ai_fallback: ["AI 補足", "warn"], followup: ["追問", "info"], referral: ["緊急轉介", "crit"], conservative: ["保守回答", "warn"], out_of_scope: ["超出範圍", "muted"] };
   const CSS = `
 .tv{--tv-line:var(--line,#dce2e8);--tv-muted:var(--muted,#5e6b78);--tv-accent:var(--accent,#1e7f7d);--tv-soft:var(--soft,#e2f2f1);--tv-bg:var(--bg,#f5f7f9);
   --tv-ok:#2e7d4f;--tv-warn:#a86a12;--tv-crit:#b23a3a;font-size:13px;line-height:1.6}

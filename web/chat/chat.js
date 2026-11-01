@@ -28,10 +28,11 @@
       const f = r.referral;
       return `<h3>這個情況需要馬上找專人（${esc(f.category)}）</h3><p>${R(f.reason)}</p><h3>該找誰</h3><p>${esc(f.who)}${f.contact ? "｜" + esc(f.contact) : ""}</p>${f.now ? `<h3>現在要做的事</h3><p>${esc(f.now)}</p>` : ""}<p class="muted small">是否通報或轉介，由你和園長決定。</p>`;
     }
-    if (r.type !== "answer" && r.type !== "continue") return `<p>${esc(r.message)}</p>`;
+    if (r.type !== "answer" && r.type !== "continue" && r.type !== "ai_fallback") return `<p>${esc(r.message)}</p>`;
     const a = r.answer, src = {};
     (r.sources || []).forEach((s) => (src[s.ref] = s));
-    const chips = (s) => (s.refs || []).filter((x) => src[x]).map((x) => `<button type="button" class="ref" data-ref="${esc(x)}">${esc(x)}</button>`).join("");
+    const chips = (s) => (s.refs || []).filter((x) => src[x]).map((x) => `<button type="button" class="ref" data-ref="${esc(x)}">${esc(x)}</button>`).join("") +
+      (r.type === "ai_fallback" && !(s.refs || []).some((x) => src[x]) ? `<span class="ai-tag">AI 補充</span>` : "");
     if (r.type === "continue") {
       let c = `<p>${R(a.reply)}</p>`;
       if ((a.strategies || []).length) c += `<h3>可以再試試</h3><ol>${a.strategies.map((s) => `<li><b>${R(s.title)}</b>：${R(s.how)}${chips(s)}</li>`).join("")}</ol>`;
@@ -41,7 +42,7 @@
       if ((a.options || []).length) c += `<div class="opts">${a.options.map((o) => `<button type="button" class="opt" data-opt="${esc(o)}">${esc(o)}</button>`).join("")}</div>`;
       return c;
     }
-    let h = `<p>${R(a.empathy)}</p>`;
+    let h = (a.notice ? `<div class="notice">${esc(a.notice)}</div>` : "") + `<p>${R(a.empathy)}</p>`;
     if (a.understanding) h += `<h3>看見與理解</h3><p>${R(a.understanding)}</p>`;
     h += `<h3>現在可以試試</h3><ol>${(a.strategies || []).map((s) => `<li><b>${R(s.title)}</b>：${R(s.how)}${chips(s)}</li>`).join("")}</ol>`;
     if (a.parent_message) h += `<h3>給家長的訊息草稿</h3><div class="pm">${R(a.parent_message)}</div><div class="actions"><button type="button" data-copy="1">複製訊息</button></div>`;
@@ -79,7 +80,7 @@
         api("feedback", { turn, kind: f.dataset.fb }).catch(() => {});
       }
     });
-    const fbOn = r.type === "answer" || r.type === "continue" || r.type === "referral" || r.type === "conservative";
+    const fbOn = r.type === "answer" || r.type === "ai_fallback" || r.type === "continue" || r.type === "referral" || r.type === "conservative";
     if (fbOn || S.trace) {
       const a = document.createElement("div"); a.className = "actions";
       a.innerHTML = (fbOn ? `<button type="button" data-fb="有幫助">👍 有幫助</button><button type="button" data-fb="沒幫助">👎 沒幫助</button>` : "") +
@@ -113,7 +114,7 @@
 
   function botSummary(r) {
     const a = r.answer || {};
-    if (r.type === "answer") return [a.empathy, "建議：" + (a.strategies || []).map((s) => s.title).join("、")].filter(Boolean).join(" ");
+    if (r.type === "answer" || r.type === "ai_fallback") return [a.empathy, "建議：" + (a.strategies || []).map((s) => s.title).join("、")].filter(Boolean).join(" ");
     if (r.type === "continue") return [a.reply, (a.strategies || []).length ? "新建議：" + a.strategies.map((s) => s.title).join("、") : "", a.parent_message ? "（已提供家長訊息）" : ""].filter(Boolean).join(" ");
     if (r.type === "followup") return r.questions.join(" ");
     return r.message || "";
