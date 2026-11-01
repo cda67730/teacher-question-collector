@@ -72,7 +72,7 @@
   function rerank(d, used) {
     used = used || [];
     const SC = ["無關", "背景", "部分回答", "直接回答"];
-    const head = `<div class="tv-muted">${d.used ? "依提問焦點重新排序" : "未重新排序（照向量順序）"}｜具體做法至少 ${esc(d.minAct)} 段｜原則／背景最多 ${esc(d.maxPri)} 段｜採用 ${esc(d.topK)} 段</div>`;
+    const head = `<div class="tv-muted">${d.used ? "依提問焦點重新排序" + (d.model ? "（" + esc(d.model) + "）" : "") : "未重新排序（照向量順序）"}｜具體做法至少 ${esc(d.minAct)} 段｜原則／背景最多 ${esc(d.maxPri)} 段｜採用 ${esc(d.topK)} 段</div>`;
     return head + (d.items || []).slice().sort((a, b) => (b.ref ? 1 : 0) - (a.ref ? 1 : 0) || (b.rerank == null ? 0 : b.rerank) - (a.rerank == null ? 0 : a.rerank)).map((x) =>
       `<div class="tv-cand ${x.ref ? "" : "off"}"><div class="tv-cand-h">${x.ref ? `<b>${esc(x.ref)}</b>` : ""}<span class="t" title="${esc(x.title)}">${esc(x.title)}${x.page ? " p." + esc(x.page) : ""}</span>` +
       `<span class="tv-tag tv-muted">${esc(x.type || "未分類")}</span>` +

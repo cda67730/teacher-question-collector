@@ -145,7 +145,7 @@ function rerankSelect_(focus, caseText, pool, C) {
   let scores = pool.map(() => null), used = false;
   if (pool.length && truthy_(C.enable_rerank == null || C.enable_rerank === '' ? true : C.enable_rerank)) {
     try {
-      const r = genJson_(C.model_check || C.model_triage, '你在替幼教老師的提問挑選參考資料，只輸出 JSON。\n' +
+      const r = genJson_(C.model_rerank || C.model_check || C.model_triage, '你在替幼教老師的提問挑選參考資料，只輸出 JSON。\n' +
         '老師這次想要的（提問焦點）：' + focus + '\n老師的描述：' + String(caseText).slice(0, 1500) + '\n\n' +
         '為每段資料打分：3＝能直接回答焦點（有具體可用的做法）、2＝部分回答、1＝只是相關背景或一般原則、0＝無關。\n' +
         '格式：{"scores":[3,1,…]}，順序與段落相同。\n\n' + pool.map((h, i) => '【' + (i + 1) + '】' + (h.type ? '（' + h.type + '）' : '') + h.text.slice(0, 600)).join('\n\n'),
@@ -171,7 +171,7 @@ function rerankSelect_(focus, caseText, pool, C) {
   const direct = used ? pick.filter(x => x.s >= 2).length : pick.length;
   return {
     hits: hits, direct: direct, actionable: pick.filter(isAct).length,
-    trace: { used: used, focus: focus, topK: topK, minAct: minAct, maxPri: maxPri,
+    trace: { used: used, model: C.model_rerank || C.model_check || C.model_triage, focus: focus, topK: topK, minAct: minAct, maxPri: maxPri,
       items: items.map(x => ({ id: x.h.id, title: x.h.title, page: x.h.page, type: x.h.type || '', vec: x.h.score, rerank: x.s,
         ref: (hits.find(h => h.id === x.h.id) || {}).ref || '', text: x.h.text.slice(0, 200) })) },
   };

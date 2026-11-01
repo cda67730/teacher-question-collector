@@ -82,6 +82,7 @@ const SETTINGS_DEFAULT = [
     ['model_triage', 'gemini-2.5-flash', 'L4 分流用模型'],
     ['model_answer', 'gemini-2.5-flash', 'A1 對話 Agent 用模型（也用於 PDF 轉文字）'],
     ['model_check', 'gemini-2.5-flash', 'L5 檢查用模型'],
+    ['model_rerank', 'gemini-2.5-flash-lite', '重新排序用模型（只打 0–3 分，用較快較省的模型即可；判斷變差可改回 gemini-2.5-flash）'],
     ['model_embed', 'gemini-embedding-001', '向量模型（更換後要重新向量化所有文件）'],
     ['embed_dim', 768, '向量維度'],
     ['temperature', 0.3, '生成溫度'],
