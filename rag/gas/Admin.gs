@@ -2,7 +2,8 @@
 
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('AI 助手後台')
-    .addItem('開啟後台', 'openAdmin')
+    .addItem('開啟後台（視窗）', 'openAdmin')
+    .addItem('後台網頁網址', 'showAdminLink')
     .addSeparator()
     .addItem('初始化工作表（setup）', 'setup')
     .addToUi();
@@ -13,12 +14,43 @@ function openAdmin() {
   SpreadsheetApp.getUi().showModalDialog(html, 'AI 助手後台');
 }
 
+/** 後台獨立網頁（由 doGet ?page=admin 呼叫） */
+function adminPage_() {
+  return HtmlService.createTemplateFromFile('AdminUI').evaluate()
+    .setTitle('AI 助手後台')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+/** 試算表選單：顯示或設定後台網頁網址（存在指令碼屬性 ADMIN_URL） */
+function showAdminLink() {
+  const url = PropertiesService.getScriptProperties().getProperty('ADMIN_URL') || '';
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const html = HtmlService.createHtmlOutput(
+    '<div style="font-family:sans-serif;font-size:14px;line-height:1.7">' +
+    (url ? '<p>後台網頁：<br><a href="' + esc(url) + '" target="_blank">' + esc(url) + '</a></p><p style="color:#666">把這個網址加入書籤即可，管理員用自己的 Google 帳號登入。</p>'
+         : '<p>還沒有設定後台網址。</p>') +
+    '<p style="color:#666">建立「以存取者身分執行」的部署後，把它的 /exec 網址加上 <b>?page=admin</b> 貼在下面：</p>' +
+    '<input id="u" style="width:100%;padding:6px" value="' + esc(url) + '" placeholder="https://script.google.com/macros/s/…/exec?page=admin">' +
+    '<p><button onclick="google.script.run.withSuccessHandler(function(){google.script.host.close()}).saveAdminUrl(document.getElementById(\'u\').value)">儲存</button></p></div>'
+  ).setWidth(560).setHeight(300);
+  SpreadsheetApp.getUi().showModalDialog(html, '後台網頁網址');
+}
+function saveAdminUrl(url) {
+  requireAdmin_();
+  url = String(url || '').trim();
+  if (url && !/^https:\/\/script\.google\.com\/.+\/exec(\?page=admin)?$/.test(url)) throw new Error('網址格式不正確');
+  if (url && !/\?page=admin$/.test(url)) url += '?page=admin';
+  PropertiesService.getScriptProperties().setProperty('ADMIN_URL', url);
+  return url;
+}
+
 function include(name) { return HtmlService.createHtmlOutputFromFile(name).getContent(); }
 
 function requireAdmin_() {
   const email = String(Session.getActiveUser().getEmail() || '').toLowerCase();
   const ok = email && rows_('admins').some(r => String(r['Email']).trim().toLowerCase() === email);
-  if (!ok) throw new Error('你的帳號（' + (email || '無法取得 email') + '）不在「管理員」名單中');
+  if (!email) throw new Error('無法取得你的帳號。請用後台專用網址開啟（「以存取者身分執行」的部署），並用 Google 帳號登入。');
+  if (!ok) throw new Error('你的帳號（' + email + '）不在「管理員」名單中');
   return email;
 }
 

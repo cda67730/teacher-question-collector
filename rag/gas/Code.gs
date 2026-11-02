@@ -3,10 +3,15 @@
  *
  * 指令碼屬性：GEMINI_API_KEY（必填）、SHEET_ID（選填，不填用綁定的試算表）
  * 其他設定（模型、system prompt、檢索參數）都在「設定」工作表或後台修改。
- * 第一次使用請執行 setup()；後台從試算表選單「AI 助手後台」開啟。
+ * 第一次使用請執行 setup()；後台可從試算表選單「AI 助手後台」開啟，
+ * 或另建一個「以存取者身分執行」的部署，用 /exec?page=admin 當獨立網頁開啟（見 rag/README.md）。
  */
 
-function doGet() { return json_({ ok: true, service: 'inclusive-ed-rag' }); }
+function doGet(e) {
+  // 後台網頁：/exec?page=admin（要用「以存取者身分執行」的部署，系統才知道是誰、能比對管理員名單）
+  if (e && e.parameter && e.parameter.page === 'admin') return adminPage_();
+  return json_({ ok: true, service: 'inclusive-ed-rag' });
+}
 
 function doPost(e) {
   try {
