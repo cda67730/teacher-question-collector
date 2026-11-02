@@ -77,6 +77,7 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
   <button data-t="eval">命中率測試</button>
   <button data-t="other">其他設定</button>
   <span class="me" id="me">載入中…</span>
+  <button class="btn" id="logout" style="align-self:center;margin-left:8px;padding:4px 10px;font-size:12px" hidden>登出</button>
 </nav>
 
 <section id="bot" class="on">
@@ -198,11 +199,30 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
 </aside>
 
 <div id="toast"></div>
+
+<!-- 網頁版登入 -->
+<div id="login" style="position:fixed;inset:0;background:#f6f8fa;z-index:20;display:none;align-items:center;justify-content:center">
+  <form id="loginForm" style="background:#fff;border:1px solid var(--line);border-radius:12px;padding:24px;width:min(360px,92vw)">
+    <h3>AI 助手後台登入</h3>
+    <label for="lgUser">帳號</label><input type="text" id="lgUser" autocomplete="username">
+    <label for="lgPass">密碼</label><input type="password" id="lgPass" autocomplete="current-password" style="width:100%;font:inherit;padding:7px 9px;border:1px solid var(--line);border-radius:8px">
+    <p id="lgErr" style="color:#b23a3a;font-size:13px;min-height:1em"></p>
+    <button class="btn pri" id="lgBtn" type="submit" style="width:100%">登入</button>
+  </form>
+</div>
+<script>const WEB_MODE = <?!= webMode ? 'true' : 'false' ?>;</script>
 <?!= include('TraceView'); ?>
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const run = (fn, ...args) => new Promise((ok, no) => google.script.run.withSuccessHandler(ok).withFailureHandler(e => no(e))[fn](...args));
+// 網頁版：每個動作都帶通行證，經 adminCall 驗證；試算表視窗版：直接呼叫（以 Google 帳號判斷）
+let TOKEN = ''; try { TOKEN = sessionStorage.getItem('adm-token') || ''; } catch (e) {}
+const callRaw = (fn, ...args) => new Promise((ok, no) => google.script.run.withSuccessHandler(ok).withFailureHandler(e => no(e))[fn](...args));
+const run = (fn, ...args) => (WEB_MODE ? callRaw('adminCall', TOKEN, fn, args) : callRaw(fn, ...args)).catch(e => {
+  if (WEB_MODE && /請先登入/.test(e.message || '')) showLogin('登入已過期，請重新登入');
+  throw e;
+});
+function showLogin(msg) { $('login').style.display = 'flex'; $('lgErr').textContent = msg || ''; $('lgUser').focus(); }
 const toast = (t, ms) => { const e = $('toast'); e.textContent = t; e.style.display = 'block'; clearTimeout(e._t); e._t = setTimeout(() => e.style.display = 'none', ms || 2500); };
 let D = null, curSkill = null;
 
@@ -212,7 +232,9 @@ document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
 });
 
 async function load() {
-  try { D = await run('adminLoad'); } catch (e) { $('me').textContent = ''; document.body.innerHTML = '<p style="padding:20px;color:#b23a3a">' + esc(e.message) + '</p>'; return; }
+  if (WEB_MODE && !TOKEN) return showLogin();
+  try { D = await run('adminLoad'); } catch (e) { if (WEB_MODE && /請先登入/.test(e.message || '')) return; $('me').textContent = ''; document.body.innerHTML = '<p style="padding:20px;color:#b23a3a">' + esc(e.message) + '</p>'; return; }
+  $('login').style.display = 'none'; $('logout').hidden = !WEB_MODE;
   $('me').textContent = D.me; $('sheetLink').href = D.sheetUrl;
   renderSettings(); renderSkills(); renderDocs();
   renderEvalDocs();
@@ -460,6 +482,16 @@ $('eRun').onclick = async () => {
     $('eStatus').textContent = `完成。${below ? below + ' 題有找到但分數低於門檻（可考慮調低 min_score 或補同義詞）；' : ''}${miss ? miss + ' 題前 10 名都沒有（文件可能缺內容或切段不好）' : ''}`;
   } catch (e) { $('eStatus').textContent = '測試失敗：' + e.message; } finally { $('eRun').disabled = false; }
 };
+
+$('loginForm').onsubmit = async (e) => {
+  e.preventDefault(); $('lgBtn').disabled = true; $('lgErr').textContent = '';
+  try {
+    const r = await callRaw('adminLogin', $('lgUser').value, $('lgPass').value);
+    TOKEN = r.token; try { sessionStorage.setItem('adm-token', TOKEN); } catch (er) {}
+    $('lgPass').value = ''; load();
+  } catch (er) { $('lgErr').textContent = er.message; } finally { $('lgBtn').disabled = false; }
+};
+$('logout').onclick = async () => { try { await callRaw('adminLogout', TOKEN); } catch (e) {} TOKEN = ''; try { sessionStorage.removeItem('adm-token'); } catch (e) {} location.reload(); };
 
 load();
 </script>

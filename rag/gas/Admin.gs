@@ -1,55 +1,118 @@
-/** 後台：從試算表選單開啟，只有「管理員」工作表裡的 email 可以使用 */
+/**
+ * 後台兩種開法：
+ *  1. 試算表選單「開啟後台（視窗）」：用 Google 帳號比對「管理員」的 Email 欄，不用登入
+ *  2. 網頁 /exec?page=admin：用帳號密碼登入（帳號在「管理員」工作表，密碼只存雜湊），不需分享試算表
+ */
 
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('AI 助手後台')
     .addItem('開啟後台（視窗）', 'openAdmin')
     .addItem('後台網頁網址', 'showAdminLink')
+    .addItem('設定後台帳號密碼', 'setAdminPasswordUi')
     .addSeparator()
     .addItem('初始化工作表（setup）', 'setup')
     .addToUi();
 }
 
 function openAdmin() {
-  const html = HtmlService.createTemplateFromFile('AdminUI').evaluate().setWidth(1280).setHeight(820);
-  SpreadsheetApp.getUi().showModalDialog(html, 'AI 助手後台');
+  const t = HtmlService.createTemplateFromFile('AdminUI'); t.webMode = false;
+  SpreadsheetApp.getUi().showModalDialog(t.evaluate().setWidth(1280).setHeight(820), 'AI 助手後台');
 }
 
-/** 後台獨立網頁（由 doGet ?page=admin 呼叫） */
+/** 後台網頁（由 doGet ?page=admin 呼叫） */
 function adminPage_() {
-  return HtmlService.createTemplateFromFile('AdminUI').evaluate()
-    .setTitle('AI 助手後台')
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  const t = HtmlService.createTemplateFromFile('AdminUI'); t.webMode = true;
+  return t.evaluate().setTitle('AI 助手後台').addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
-/** 試算表選單：顯示或設定後台網頁網址（存在指令碼屬性 ADMIN_URL） */
+/** 試算表選單：顯示後台網址 */
 function showAdminLink() {
-  const url = PropertiesService.getScriptProperties().getProperty('ADMIN_URL') || '';
-  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const html = HtmlService.createHtmlOutput(
-    '<div style="font-family:sans-serif;font-size:14px;line-height:1.7">' +
-    (url ? '<p>後台網頁：<br><a href="' + esc(url) + '" target="_blank">' + esc(url) + '</a></p><p style="color:#666">把這個網址加入書籤即可，管理員用自己的 Google 帳號登入。</p>'
-         : '<p>還沒有設定後台網址。</p>') +
-    '<p style="color:#666">建立「以存取者身分執行」的部署後，把它的 /exec 網址加上 <b>?page=admin</b> 貼在下面：</p>' +
-    '<input id="u" style="width:100%;padding:6px" value="' + esc(url) + '" placeholder="https://script.google.com/macros/s/…/exec?page=admin">' +
-    '<p><button onclick="google.script.run.withSuccessHandler(function(){google.script.host.close()}).saveAdminUrl(document.getElementById(\'u\').value)">儲存</button></p></div>'
-  ).setWidth(560).setHeight(300);
-  SpreadsheetApp.getUi().showModalDialog(html, '後台網頁網址');
-}
-function saveAdminUrl(url) {
   requireAdmin_();
-  url = String(url || '').trim();
-  if (url && !/^https:\/\/script\.google\.com\/.+\/exec(\?page=admin)?$/.test(url)) throw new Error('網址格式不正確');
-  if (url && !/\?page=admin$/.test(url)) url += '?page=admin';
-  PropertiesService.getScriptProperties().setProperty('ADMIN_URL', url);
-  return url;
+  let url = '';
+  try { url = ScriptApp.getService().getUrl() || ''; } catch (e) {}
+  url = url ? url.replace(/\/dev$/, '/exec') + '?page=admin' : '';
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const html = HtmlService.createHtmlOutput('<div style="font-family:sans-serif;font-size:14px;line-height:1.7">' +
+    (url ? '<p>後台網址：<br><a href="' + esc(url) + '" target="_blank">' + esc(url) + '</a></p>' : '<p>還沒有部署網頁應用程式。部署後，網址是聊天頁用的 /exec 網址加上 <b>?page=admin</b>。</p>') +
+    '<p style="color:#666">用「設定後台帳號密碼」建立的帳號登入。登入有效 6 小時。</p></div>').setWidth(560).setHeight(220);
+  SpreadsheetApp.getUi().showModalDialog(html, '後台網址');
+}
+
+// ---------- 帳號密碼 ----------
+const SESSION_SECONDS = 21600;        // 6 小時（CacheService 上限）
+const LOGIN_MAX_FAIL = 5, LOGIN_LOCK_SECONDS = 900;
+function hashPassword_(password, salt) {
+  let h = salt + '|' + password;
+  for (let i = 0; i < 200; i++) h = Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, h, Utilities.Charset.UTF_8));
+  return h;
+}
+/** 試算表選單：新增帳號或重設密碼（只有管理員 Email 名單內的人能操作） */
+function setAdminPasswordUi() {
+  requireAdmin_();
+  const ui = SpreadsheetApp.getUi();
+  const a = ui.prompt('設定後台帳號密碼', '帳號（英數字，例如 liu 或 email）：', ui.ButtonSet.OK_CANCEL);
+  if (a.getSelectedButton() !== ui.Button.OK) return;
+  const account = a.getResponseText().trim();
+  if (!/^[A-Za-z0-9._@-]{3,64}$/.test(account)) return ui.alert('帳號只能用英文、數字和 . _ @ -，3 到 64 個字');
+  const p = ui.prompt('設定後台帳號密碼', '「' + account + '」的密碼（至少 10 個字）：', ui.ButtonSet.OK_CANCEL);
+  if (p.getSelectedButton() !== ui.Button.OK) return;
+  const pw = p.getResponseText();
+  if (pw.length < 10) return ui.alert('密碼至少 10 個字');
+  setAdminPassword_(account, pw);
+  ui.alert('已設定「' + account + '」。後台網址可從選單「後台網頁網址」查看。');
+}
+function setAdminPassword_(account, pw) {
+  const s = sh_('admins'); const head = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
+  ['帳號', '密碼雜湊', '鹽'].forEach(h => { if (head.indexOf(h) < 0) { head.push(h); s.getRange(1, head.length).setValue(h).setFontWeight('bold'); } });
+  const salt = Utilities.getUuid(), hash = hashPassword_(pw, salt);
+  const r = rows_('admins').find(x => String(x['帳號'] || '').toLowerCase() === account.toLowerCase());
+  const row = r ? r._row : s.getLastRow() + 1;
+  if (!r) s.getRange(row, head.indexOf('備註') + 1).setValue('後台帳號');
+  s.getRange(row, head.indexOf('帳號') + 1).setValue(account);
+  s.getRange(row, head.indexOf('密碼雜湊') + 1).setValue(hash);
+  s.getRange(row, head.indexOf('鹽') + 1).setValue(salt);
+}
+/** 網頁登入：成功回傳通行證（6 小時）；同一帳號連錯 5 次鎖 15 分鐘 */
+function adminLogin(account, password) {
+  account = String(account || '').trim(); password = String(password || '');
+  if (!account || !password) throw new Error('請輸入帳號和密碼');
+  const cache = CacheService.getScriptCache(), fk = 'loginfail_' + account.toLowerCase();
+  const fails = Number(cache.get(fk) || 0);
+  if (fails >= LOGIN_MAX_FAIL) throw new Error('嘗試太多次，請 15 分鐘後再試');
+  const r = rows_('admins').find(x => String(x['帳號'] || '').toLowerCase() === account.toLowerCase());
+  const ok = r && r['密碼雜湊'] && r['鹽'] && hashPassword_(password, String(r['鹽'])) === String(r['密碼雜湊']);
+  if (!ok) { cache.put(fk, String(fails + 1), LOGIN_LOCK_SECONDS); throw new Error('帳號或密碼不正確'); }
+  cache.remove(fk);
+  const token = Utilities.getUuid() + Utilities.getUuid().replace(/-/g, '');
+  cache.put('admsess_' + token, String(r['帳號']), SESSION_SECONDS);
+  return { token: token, account: String(r['帳號']) };
+}
+function adminLogout(token) { if (token) CacheService.getScriptCache().remove('admsess_' + token); return true; }
+
+/** 網頁版的所有後台動作都經過這裡：先驗通行證，再呼叫白名單內的功能 */
+let ADMIN_CTX_ = null;
+function adminCall(token, fn, args) {
+  const account = token ? CacheService.getScriptCache().get('admsess_' + token) : null;
+  if (!account) throw new Error('請先登入後台（登入已過期或尚未登入）');
+  const API = {
+    adminLoad: adminLoad, adminSaveSettings: adminSaveSettings, adminSaveSkill: adminSaveSkill, adminSkillHistory: adminSkillHistory,
+    adminUploadDoc: adminUploadDoc, adminDocChunks: adminDocChunks, adminSetChunkType: adminSetChunkType, adminClassifyDoc: adminClassifyDoc,
+    adminSetDocStatus: adminSetDocStatus, adminTestChat: adminTestChat, adminLogs: adminLogs, adminLogDetail: adminLogDetail,
+    adminEvalList: adminEvalList, adminAddEval: adminAddEval, adminDeleteEval: adminDeleteEval, adminRunEval: adminRunEval,
+  };
+  if (!API[fn]) throw new Error('未知的操作');
+  ADMIN_CTX_ = account;
+  try { return API[fn].apply(null, args || []); } finally { ADMIN_CTX_ = null; }
 }
 
 function include(name) { return HtmlService.createHtmlOutputFromFile(name).getContent(); }
 
+/** 回傳目前管理員：網頁登入的帳號，或試算表選單開啟時的 Google 帳號 */
 function requireAdmin_() {
+  if (ADMIN_CTX_) return ADMIN_CTX_;
   const email = String(Session.getActiveUser().getEmail() || '').toLowerCase();
-  const ok = email && rows_('admins').some(r => String(r['Email']).trim().toLowerCase() === email);
-  if (!email) throw new Error('無法取得你的帳號。請用後台專用網址開啟（「以存取者身分執行」的部署），並用 Google 帳號登入。');
+  if (!email) throw new Error('請先登入後台');
+  const ok = rows_('admins').some(r => String(r['Email']).trim().toLowerCase() === email);
   if (!ok) throw new Error('你的帳號（' + email + '）不在「管理員」名單中');
   return email;
 }

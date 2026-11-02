@@ -122,6 +122,8 @@ function addMissingSettings_() {
 }
 
 function setup() {
+  // 只能從 Apps Script 編輯器或試算表選單執行（網頁上的匿名呼叫拿不到帳號，直接拒絕）
+  if (!Session.getActiveUser().getEmail()) throw new Error('請從 Apps Script 編輯器或試算表選單執行 setup()');
   const ss = ss_();
   const make = (name, head, seed) => {
     let s = ss.getSheetByName(name);
@@ -153,7 +155,7 @@ function setup() {
   make(SHEETS.referral, ['類別', '該找誰', '聯絡方式', '現在要做的事'], REFERRAL_DEFAULT);
   make(SHEETS.codes, ['邀請碼', '園所代號', '啟用', '觀測'], [['TEST-2026', '測試園', true, true]]);
   const me = Session.getActiveUser().getEmail();
-  make(SHEETS.admins, ['Email', '備註'], me ? [[me, '建立者']] : []);
+  make(SHEETS.admins, ['Email', '備註', '帳號', '密碼雜湊', '鹽'], me ? [[me, '建立者', '', '', '']] : []);
   make(SHEETS.logs, ['時間', 'Session', '園所', '輪次', '老師訊息（去識別化）', '分流', '轉介', '回應類型', '回答', '引用', '檢查', '是否重寫', '耗時ms', '檢索段數', '最高相似度', '被引用段數', '載入Skill', '流程紀錄']);
   make(SHEETS.feedback, ['時間', 'Session', '輪次', '類型', '備註']);
   make(SHEETS.evalset, ['測試問題', '應命中文件ID', '備註', '結果', '名次', '最高分', '命中段落', '測試時間']);
