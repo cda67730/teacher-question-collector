@@ -9,8 +9,8 @@ function extractText_(name, mimeType, b64) {
   }
   if (/\.pdf$/.test(lower) || mimeType === 'application/pdf') {
     const prompt = '請把這份 PDF 的文字完整轉錄出來，保留標題與段落，不要摘要、不要改寫。每一頁開頭加上一行「[[第N頁]]」。表格用文字逐列轉錄。只輸出轉錄內容。';
-    const a = reqArgs_(genReq_(cfg_('model_answer'), [{ text: prompt }, { inline_data: { mime_type: 'application/pdf', data: b64 } }], { temperature: 0, maxTokens: 65536 }));
-    return genText_(UrlFetchApp.fetch(a[0], a[1]));
+    const req = genReq_(cfg_('model_answer'), [{ text: prompt }, { inline_data: { mime_type: 'application/pdf', data: b64 } }], { temperature: 0, maxTokens: 65536 }); const a = reqArgs_(req);
+    return genText_(genFix_(req, UrlFetchApp.fetch(a[0], a[1])));
   }
   if (/\.docx?$/.test(lower)) {
     // 需要在 Apps Script 開啟「Drive API」進階服務（v3）

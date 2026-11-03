@@ -57,11 +57,9 @@ function runChat_(req, opts) {
   const topics = Array.from(new Set([].concat.apply([], skills.filter(s => !s.always).map(s => s.tags))));
   const refTable = referral_();
   const expAll = expandQuery_(fullCase), expNew = expandQuery_(d.text);
-  const [triRes, embRes] = UrlFetchApp.fetchAll([
-    genReq_(C.model_triage, [{ text: triagePrompt_(prevTeacher, d.text, topics, Object.keys(refTable)) }], { json: true, temperature: 0, noThink: true }),
-    embedReqs_([expAll.text, expNew.text], 'RETRIEVAL_QUERY')[0],
-  ]);
-  const tri = parseJson_(genText_(triRes));
+  const triReq = genReq_(C.model_triage, [{ text: triagePrompt_(prevTeacher, d.text, topics, Object.keys(refTable)) }], { json: true, temperature: 0, noThink: true });
+  const [triRes, embRes] = UrlFetchApp.fetchAll([triReq, embedReqs_([expAll.text, expNew.text], 'RETRIEVAL_QUERY')[0]]);
+  const tri = parseJson_(genText_(genFix_(triReq, triRes)));
   const vecs = embedParse_(embRes);
   const ref = tri.referral && tri.referral.category && tri.referral.category !== 'none' && tri.referral.level && tri.referral.level !== 'none' ? tri.referral : null;
   T('L4 分流', tri, 'triage');

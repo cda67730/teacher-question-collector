@@ -88,8 +88,9 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
   <h3>機器人設定 <span class="note">修改後按儲存，約 1 分鐘內生效</span></h3>
   <div class="box" id="modelBox">
     <div class="row" style="justify-content:space-between"><h4 style="margin:0">可用模型 <span class="note" id="modelSum">讀取中…</span></h4>
-      <div class="row"><button class="btn" id="modelList" style="padding:4px 10px;font-size:12px">看清單</button><button class="btn" id="modelRefresh" style="padding:4px 10px;font-size:12px">重新讀取</button></div></div>
+      <div class="row"><button class="btn" data-preset="g3" style="padding:4px 10px;font-size:12px">套用 Gemini 3 組合</button><button class="btn" data-preset="g25" style="padding:4px 10px;font-size:12px">還原 2.5 組合</button><button class="btn" id="modelList" style="padding:4px 10px;font-size:12px">看清單</button><button class="btn" id="modelRefresh" style="padding:4px 10px;font-size:12px">重新讀取</button></div></div>
     <p class="note" style="margin:4px 0 0">清單直接向 Gemini API 查詢這把金鑰能用的模型。下方 model_ 開頭的設定可直接選；選好可按「測試」確認能用與速度。Gemini 3 以上會自動改用官方建議的參數（溫度維持預設、思考等級 low）。</p>
+    <p class="note" style="margin:4px 0 0">Gemini 3 組合：分流與重排用 3.1 Flash-Lite（快、省），回答用 3.8 Flash，檢查用 3.6 Flash。套用後會直接儲存，可再逐一測試。</p>
     <div id="modelTable" hidden style="margin-top:8px;max-height:360px;overflow:auto"></div>
   </div>
   <div id="settings"></div>
@@ -323,6 +324,21 @@ async function loadModels(force) {
       `<table style="margin-top:8px"><thead><tr><th>向量模型 ID</th><th>名稱</th><th class="num">輸入上限</th><th>說明</th></tr></thead><tbody>${MODELS.embed.map(row).join('')}</tbody></table>`;
   } catch (e) { $('modelSum').textContent = '讀取失敗：' + e.message; }
 }
+const PRESETS = {
+  g3: { model_triage: 'gemini-3.1-flash-lite', model_rerank: 'gemini-3.1-flash-lite', model_answer: 'gemini-3.8-flash', model_check: 'gemini-3.6-flash' },
+  g25: { model_triage: 'gemini-2.5-flash', model_rerank: 'gemini-2.5-flash-lite', model_answer: 'gemini-2.5-flash', model_check: 'gemini-2.5-flash' },
+};
+document.querySelectorAll('[data-preset]').forEach(b => b.onclick = async () => {
+  const p = PRESETS[b.dataset.preset];
+  const missing = MODELS ? Object.values(p).filter(id => !MODELS.gen.some(m => m.id === id)) : [];
+  if (missing.length) return toast('這把金鑰看不到：' + Array.from(new Set(missing)).join('、') + '，請先按「看清單」確認', 6000);
+  b.disabled = true;
+  try {
+    await run('adminSaveSettings', Object.keys(p).map(k => ({ key: k, value: p[k] })));
+    D.settings.forEach(s => { if (p[s.key]) s.value = p[s.key]; }); renderSettings();
+    toast('已套用並儲存：' + Object.keys(p).map(k => k.replace('model_', '') + '＝' + p[k]).join('、'), 5000);
+  } catch (e) { toast('套用失敗：' + e.message, 5000); } finally { b.disabled = false; }
+});
 $('modelRefresh').onclick = () => loadModels(true);
 $('modelList').onclick = () => { $('modelTable').hidden = !$('modelTable').hidden; $('modelList').textContent = $('modelTable').hidden ? '看清單' : '收起'; };
 $('settings').addEventListener('click', async e => {

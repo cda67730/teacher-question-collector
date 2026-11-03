@@ -21,8 +21,9 @@ function genReq_(model, parts, opts) {
   if (opts.json) body.generationConfig.responseMimeType = 'application/json';
   if (opts.maxTokens) body.generationConfig.maxOutputTokens = opts.maxTokens;
   // 分流、檢查這類單一任務不需要模型「思考」，關掉可省下數秒
-  //  2.5 Flash 系列：thinkingBudget 0；3 以上無法完全關閉，用各型號都支援的最低共同等級 low
-  if (opts.noThink && v3) body.generationConfig.thinkingConfig = { thinkingLevel: 'low' };
+  //  2.5 Flash 系列：thinkingBudget 0；3 以上無法完全關閉：3.1 Flash-Lite 用 minimal，其他用各型號都支援的 low
+  //  （3.8 Flash 不支援 minimal；若某個型號不接受，genFix_ 會拿掉思考設定重送）
+  if (opts.noThink && v3) body.generationConfig.thinkingConfig = { thinkingLevel: /3\.1-flash-lite/.test(model) ? 'minimal' : 'low' };
   else if (opts.noThink && /2\.5-flash/.test(model)) body.generationConfig.thinkingConfig = { thinkingBudget: 0 };
   return {
     url: GEMINI_BASE + model + ':generateContent', method: 'post', contentType: 'application/json',
@@ -45,8 +46,18 @@ function parseJson_(text) {
 }
 
 function gen_(model, prompt, opts) {
-  const a = reqArgs_(genReq_(model, [{ text: prompt }], opts));
-  return genText_(UrlFetchApp.fetch(a[0], a[1]));
+  const req = genReq_(model, [{ text: prompt }], opts); const a = reqArgs_(req);
+  return genText_(genFix_(req, UrlFetchApp.fetch(a[0], a[1])));
+}
+
+/** 新模型不接受某些參數（思考設定、溫度）而回 400 時，拿掉這些參數重送一次 */
+function genFix_(req, res) {
+  if (res.getResponseCode() !== 400 || !/thinking|temperature|top_?p|top_?k/i.test(res.getContentText())) return res;
+  const body = JSON.parse(req.payload);
+  ['thinkingConfig', 'temperature', 'topP', 'topK'].forEach(k => delete body.generationConfig[k]);
+  const a = reqArgs_(Object.assign({}, req, { payload: JSON.stringify(body) }));
+  console.warn('模型不接受部分參數，已拿掉後重送：' + req.url);
+  return UrlFetchApp.fetch(a[0], a[1]);
 }
 function genJson_(model, prompt, opts) {
   return parseJson_(gen_(model, prompt, Object.assign({ json: true }, opts || {})));
