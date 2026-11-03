@@ -111,7 +111,7 @@ function runChat_(req, opts) {
     return finish({ type: 'followup', empathy: str_(fu.empathy), questions: (fu.questions || []).map(str_).slice(0, 2), followups: fuDone + 1 });
   }
 
-  // 前幾輪給完整回答；之後（或老師點選特定協助）改成「延續回覆」：只回應新內容，並提供下一步選項
+  // 前幾輪給完整回答；之後（或使用者點選特定協助）改成「延續回覆」：只回應新內容，並提供下一步選項
   const fullRounds = Number(C.full_answer_rounds == null || C.full_answer_rounds === '' ? 2 : C.full_answer_rounds);
   const mode = intent === '要求特定協助' && !isNew ? 'continue' : (answered >= fullRounds ? 'continue' : 'full');
   T('P04 狀態機', intent + '｜' + (tri.info_enough ? '資訊足夠' : '已追問過') + '｜已完整回答 ' + answered + ' 次 → ' +
@@ -200,7 +200,7 @@ function continueOptions_() {
   return text_('continue_options').split(/\n+/).map(s => s.replace(/^[-・\d.、\s]+/, '').trim()).filter(Boolean);
 }
 
-/** 延續回覆：已經給過完整建議，這次只回應新的內容或老師要的那件事 */
+/** 延續回覆：已經給過完整建議，這次只回應新的內容或使用者要的那件事 */
 function assembleContinue_(sys, skillText, tri, prevTeacher, latest, hits, history, ref, refWho, intent, feedback, focus) {
   const forbiddenWords = forbidden_().filter(f => !f.regex).map(f => f.rule);
   const hist = history.map(h => (h.role === 'teacher' ? '老師：' : '助手：') + h.text).join('\n');

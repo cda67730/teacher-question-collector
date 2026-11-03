@@ -1,5 +1,5 @@
 /**
- * 幼兒園現場問題收集：後端（Google Apps Script 網頁應用程式）
+ * 現場問題收集：後端（Google Apps Script 網頁應用程式）
  *
  * 指令碼屬性（專案設定 → 指令碼屬性）：
  *   GEMINI_API_KEY  必填，Gemini API 金鑰（建議使用付費方案，避免資料被用於訓練）
@@ -7,7 +7,7 @@
  *   SHEET_ID        選填，資料寫入的試算表 ID；不填則使用綁定的試算表
  *   HOURLY_LIMIT    選填，每個邀請碼每小時可呼叫次數，預設 300
  *
- * 邀請碼放在試算表的「邀請碼」工作表：A 欄邀請碼、B 欄園所代號、C 欄是否啟用（TRUE/FALSE）
+ * 邀請碼放在試算表的「邀請碼」工作表：A 欄邀請碼、B 欄單位代號、C 欄是否啟用（TRUE/FALSE）
  * 第一次使用請在編輯器執行 setup()。
  */
 
@@ -129,7 +129,7 @@ function submit_(school, bg, answers) {
   return id;
 }
 
-// 幼兒題的必填資料（填槽）：不是幼兒題的列標「不適用」
+// 個案題的必填資料（填槽）：不是個案題的列標「不適用」
 const SLOT_HEAD = ['幼兒月齡', '幼兒年齡', '發生時段', '已試做法（去識別化）', '試做結果', '資料是否填齊'];
 function slotCols_(a) {
   const s = a.child && a.slots;

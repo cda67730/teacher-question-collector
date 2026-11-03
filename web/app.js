@@ -13,7 +13,7 @@
     qid: q.id, question: q.text, hint: q.hint || "", extra: !!extra,
     answer: "", transcript: "", voice: false, skipped: false,
     followups: [], fuAsked: false, followupAnswer: "",
-    child: q.child === true ? true : q.child === "ask" ? "ask" : false,   // 這題是否要填孩子資料
+    child: q.child === true ? true : q.child === "ask" ? "ask" : false,   // 這題是否要填個案資料
     childOn: q.child === true,
     slots: { ageY: "", ageM: "", sits: [], tried: "", notTried: false, result: "" },
   });
@@ -217,7 +217,7 @@
   // ---------- 第 2 頁：一題一頁 ----------
   const cur = () => state.items[state.idx];
 
-  // ---------- 幼兒題的必填資料 ----------
+  // ---------- 個案題的必填資料 ----------
   const S = C.CHILD_SLOTS;
   $("ageM").innerHTML = '<option value="">個月</option>' + Array.from({ length: 12 }, (_, m) => `<option value="${m}">${m} 個月</option>`).join("");
   $("result").innerHTML = '<option value="">請選擇</option>' + S.RESULTS.map((x) => `<option>${esc(x)}</option>`).join("");
@@ -332,7 +332,7 @@
     if (miss.length) { $("slots").scrollIntoView({ behavior: "smooth", block: "start" }); return ($("e-q").textContent = "請先填好孩子的基本狀況：" + miss.join("、")); }
     if (!it.answer) return ($("e-q").textContent = it.extra ? "請錄音或打字，或按「刪除這題」。" : "請錄音或打字回答，或按「跳過」。");
     it.skipped = false;
-    // 每題只追問一次；有需要才顯示，老師可以補充也可以直接往下
+    // 每題只追問一次；有需要才顯示，使用者可以補充也可以直接往下
     if (!it.fuAsked) {
       it.fuAsked = true;
       const lock = (v) => ["b-next", "b-skip", "b-prev", "b-mic", "b-mic2"].forEach((id) => ($(id).disabled = v));
