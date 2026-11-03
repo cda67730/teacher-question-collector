@@ -175,10 +175,12 @@ function adminDocChunks(docId) {
   const nodes = {}; const label = {};
   if (kgHasGraph_()) {
     kgNodes_(true).forEach(n => label[String(n['節點ID'])] = String(n['名稱']));
-    rows_('kgLinks').forEach(l => { const k = String(l['段落ID']); (nodes[k] = nodes[k] || []).push(label[String(l['節點ID'])] || String(l['節點ID'])); });
+    rows_('kgLinks').forEach(l => { const k = String(l['段落ID']); const tag = String(l['標籤'] || '主要');
+      (nodes[k] = nodes[k] || []).push((tag === '主要' ? '' : tag + '：') + (label[String(l['節點ID'])] || String(l['節點ID']))); });
   }
   return rows_('chunks').filter(r => String(r['文件ID']) === String(docId)).map(r => ({ id: r['段落ID'], n: r['序號'], page: r['頁碼'], text: r['內容'], status: r['狀態'], type: String(r['類型'] || ''),
-    nodes: Array.from(new Set(nodes[String(r['段落ID'])] || [])) }));
+    nodes: Array.from(new Set(nodes[String(r['段落ID'])] || [])).sort((a, b) => (a.indexOf('：') >= 0) - (b.indexOf('：') >= 0)),
+    meta: ['讀者對象', '適用年齡', '情境'].map(h => r[h] ? h + '：' + r[h] : '').filter(Boolean).join('｜') }));
 }
 /** 修改單一段落的類型 */
 function adminSetChunkType(chunkId, type) {

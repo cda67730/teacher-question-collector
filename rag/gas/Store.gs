@@ -4,7 +4,7 @@ const SHEETS = {
   settings: '設定', skills: 'Skill', skillHist: 'Skill版本', docs: '文件', chunks: '知識段落',
   synonyms: '同義詞', forbidden: '禁止用語', referral: '轉介資源', codes: '邀請碼',
   admins: '管理員', logs: '對話紀錄', feedback: '回饋', evalset: '檢索測試',
-  kgNodes: '節點', kgEdges: '關係', kgSources: '圖譜來源', kgLinks: '段落節點', kgCands: '新節點候選',
+  kgNodes: '節點', kgEdges: '關係', kgSources: '圖譜來源', kgLinks: '段落節點', kgCands: '新節點候選', kgDefs: '圖譜定義',
 };
 
 function ss_() {

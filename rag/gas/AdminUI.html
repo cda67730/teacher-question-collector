@@ -67,7 +67,7 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
 .cand-ok{color:var(--ok);font-weight:600}
 .cand{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:8px 0}
 .cand .q{font-size:12px;color:var(--muted);background:var(--bg);border-radius:6px;padding:6px 8px;margin:6px 0;white-space:pre-wrap}
-.zero{color:var(--err)} .nodechip{display:inline-block;font-size:12px;background:var(--soft);color:var(--accent);border-radius:999px;padding:0 8px;margin:2px 4px 0 0}
+.zero{color:var(--err)} .nodechip.sub{background:var(--bg);color:var(--muted)} .warn{color:var(--warn);font-size:12px;margin-top:4px} .nodechip{display:inline-block;font-size:12px;background:var(--soft);color:var(--accent);border-radius:999px;padding:0 8px;margin:2px 4px 0 0}
 </style>
 </head>
 <body>
@@ -216,13 +216,13 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
     <div id="kgCands"></div>
   </div>
   <div class="box">
-    <h4>節點覆蓋度 <span class="note">掛接＝有幾段文件對應到這個節點；核可＝其中已核可的段數；做法＝已核可且屬於具體做法／案例／溝通範例的段數</span></h4>
+    <h4>節點覆蓋度 <span class="note">主要＝以這個節點為主要標籤的段數；核可＝其中已核可的段數；做法＝已核可且屬於具體做法／案例／溝通範例的段數；次要＝隱含運用這個節點的段數（不算覆蓋）</span></h4>
     <div class="row" style="margin-bottom:8px">
       <input type="text" id="kgQ" placeholder="搜尋節點名稱或分類" style="max-width:260px">
       <select id="kgF" style="width:auto"><option value="">全部節點</option><option value="none">還沒有已核可內容</option><option value="noact">沒有具體做法</option><option value="has">已有內容</option><option value="prop">文件提案新增</option></select>
       <span class="note" id="kgCount"></span>
     </div>
-    <div class="list" style="max-height:520px"><table><thead><tr><th>節點</th><th>類型</th><th>分類路徑</th><th class="num">掛接</th><th class="num">核可</th><th class="num">做法</th></tr></thead><tbody id="kgRows"></tbody></table></div>
+    <div class="list" style="max-height:520px"><table><thead><tr><th>節點</th><th>類型</th><th>分類路徑</th><th class="num">主要</th><th class="num">核可</th><th class="num">做法</th><th class="num">次要</th></tr></thead><tbody id="kgRows"></tbody></table></div>
   </div>
   <div class="box">
     <h4>舊文件補對應</h4>
@@ -336,7 +336,7 @@ async function docAction(a, id, b) {
       const untyped = cs.filter(c => !c.type).length;
       $('chunkView').innerHTML = `<h3 style="margin-top:18px">段落：${esc(d.title)}（${cs.length} 段）</h3>` +
         `<p class="row note">段落類型用來限制「原則／背景」的比例，讓回答以具體做法為主。${untyped ? `<button class="btn" id="classifyDoc">AI 補分類（${untyped} 段未分類）</button>` : ''}</p>` +
-        cs.map(c => `<div class="chunk"><span class="note">#${c.n}${c.page ? '｜第' + esc(c.page) + '頁' : ''}｜${esc(c.status)}｜類型 <select data-ct="${esc(c.id)}" style="width:auto;padding:2px 6px"><option value="">未分類</option>${TYPES.map(t => `<option ${t === c.type ? 'selected' : ''}>${t}</option>`).join('')}</select></span>${(c.nodes || []).length ? '\n' + c.nodes.map(n => `<span class="nodechip">${esc(n)}</span>`).join('') : ''}\n${esc(c.text)}</div>`).join('');
+        cs.map(c => `<div class="chunk"><span class="note">#${c.n}${c.page ? '｜第' + esc(c.page) + '頁' : ''}｜${esc(c.status)}｜類型 <select data-ct="${esc(c.id)}" style="width:auto;padding:2px 6px"><option value="">未分類</option>${TYPES.map(t => `<option ${t === c.type ? 'selected' : ''}>${t}</option>`).join('')}</select></span>${(c.nodes || []).length ? '\n' + c.nodes.map(n => `<span class="nodechip${n.indexOf('：') >= 0 ? ' sub' : ''}">${esc(n)}</span>`).join('') : ''}${c.meta ? `\n<span class="note">${esc(c.meta)}</span>` : ''}\n${esc(c.text)}</div>`).join('');
       $('chunkView').querySelectorAll('[data-ct]').forEach(sel => sel.onchange = async () => { try { await run('adminSetChunkType', sel.dataset.ct, sel.value); toast('已更新類型'); } catch (e) { toast(e.message, 4000); } });
       const cb = $('classifyDoc'); if (cb) cb.onclick = async () => { cb.disabled = true; cb.textContent = '分類中…'; try { const r = await run('adminClassifyDoc', id); toast(`已分類 ${r.done}／${r.total} 段`); docAction('view', id, b); } catch (e) { toast(e.message, 4000); cb.disabled = false; } };
       $('chunkView').scrollIntoView();
@@ -353,7 +353,7 @@ $('upload').onclick = async () => {
     const p = { title, source: $('dSource').value.trim(), evidence: $('dEv').value, text: f ? '' : text };
     if (f) { p.fileName = f.name; p.mimeType = f.type; p.base64 = await new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1]); r.onerror = no; r.readAsDataURL(f); }); }
     const r = await run('adminUploadDoc', p);
-    const g = r.graph; const gt = !g ? '' : g.error ? `\n節點對應失敗：${g.error}（可到「知識圖譜」分頁補做）` : g.skipped ? '' : `\n已對應知識圖譜 ${g.links} 筆${g.candidates ? `，提出 ${g.candidates} 個新節點候選` : ''}${g.candidateHits ? `，${g.candidateHits} 次呼應既有候選` : ''}（到「知識圖譜」分頁審核）。`;
+    const g = r.graph; const gt = !g ? '' : g.error ? `\n節點對應失敗：${g.error}（可到「知識圖譜」分頁補做）` : g.skipped ? '' : `\n已標註知識圖譜節點 ${g.links} 筆（主要 ${g.main}）${g.candidates ? `，提出 ${g.candidates} 個新節點候選` : ''}${g.candidateHits ? `，${g.candidateHits} 次呼應既有候選` : ''}（到「知識圖譜」分頁審核）。`;
     $('upStatus').textContent = `完成：切成 ${r.chunks} 段，狀態為「待審核」。請檢查段落後按「核可」。` + gt; $('upStatus').style.whiteSpace = 'pre-wrap';
     $('dFile').value = ''; $('dText').value = ''; $('dTitle').value = ''; $('dSource').value = '';
     D = await run('adminLoad'); renderDocs();
@@ -536,11 +536,12 @@ function renderCands() {
     <div class="note">${esc(c.def)}</div>
     ${c.reason ? `<div class="note">AI 理由：${esc(c.reason)}</div>` : ''}
     ${c.rel ? `<div class="note">建議關係：本節點 → ${esc(c.rel.label)} → ${esc(c.rel.targetLabel)}</div>` : ''}
+    <div class="warn" data-w>${(c.warns || []).map(esc).join('<br>')}</div>
     ${c.snippet ? `<div class="q">${esc(c.snippet)}…</div>` : ''}
     <div class="grid3" style="margin-top:6px">
       <div><label>名稱</label><input type="text" data-f="name" value="${esc(c.name)}"></div>
       <div><label>上層節點</label><select data-f="parent">${nodeOptions(c.parent)}</select></div>
-      <div><label>類型</label><select data-f="type">${['概念','實務策略','理論','障礙與需求類別','法規課綱','課程取向','子分類'].map(t => `<option ${t === c.type ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+      <div><label>類型</label><select data-f="type">${G.types.map(t => `<option ${t === c.type ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
     </div>
     <label>定義</label><input type="text" data-f="def" value="${esc(c.def)}">
     <div class="row" style="margin-top:8px">
@@ -548,6 +549,17 @@ function renderCands() {
       <select data-f="target" style="width:auto;max-width:260px">${nodeOptions('').replace('（無上層）', '合併到…')}</select><button class="btn" data-a="merge">合併</button>
       <button class="btn" data-a="skip">略過</button>
     </div></div>`).join('') || '<p class="note">目前沒有待審核的候選。</p>';
+  // 改上層或類型時，即時檢查這種接法在圖譜裡常不常見（只提醒）
+  $('kgCands').querySelectorAll('.cand').forEach(box => {
+    const c = G.cands.find(x => x.id === box.dataset.id);
+    const chk = () => {
+      const p = box.querySelector('[data-f="parent"]').value, t = box.querySelector('[data-f="type"]').value; const w = [];
+      if (p) { const m = G.pairs.hasPart || {}; if (!m[G.nodeTypes[p] + '>' + t]) w.push(`上層：圖譜裡沒有「${G.nodeTypes[p]} →包含→ ${t}」這種接法，請確認`); }
+      if (c.rel && c.rel.type !== 'relatedTo' && G.nodeTypes[c.rel.target]) { const m = G.pairs[c.rel.type] || {}; if (!m[t + '>' + G.nodeTypes[c.rel.target]]) w.push(`建議關係：圖譜裡沒有「${t} →${c.rel.label}→ ${G.nodeTypes[c.rel.target]}」這種接法，請確認`); }
+      box.querySelector('[data-w]').innerHTML = w.map(esc).join('<br>');
+    };
+    box.querySelector('[data-f="parent"]').onchange = chk; box.querySelector('[data-f="type"]').onchange = chk;
+  });
   $('kgCands').querySelectorAll('button[data-a]').forEach(b => b.onclick = async () => {
     const box = b.closest('.cand'); const f = n => box.querySelector(`[data-f="${n}"]`).value;
     const a = b.dataset.a; const opts = a === 'approve' ? { name: f('name'), parent: f('parent'), type: f('type'), def: f('def') } : a === 'merge' ? { target: f('target') } : {};
@@ -562,20 +574,20 @@ function renderNodes() {
   const list = G.nodes.filter(n => (!q || (n.label + n.path + n.syn).includes(q)) &&
     (!f || (f === 'none' && n.ok === 0) || (f === 'noact' && n.act === 0) || (f === 'has' && n.ok > 0) || (f === 'prop' && n.from === '文件提案')));
   $('kgCount').textContent = `${list.length} 個節點`;
-  $('kgRows').innerHTML = list.map(n => `<tr><td>${esc(n.label)}${n.status === '停用' ? ' <span class="pill 停用">停用</span>' : ''}${n.from === '文件提案' ? ' <span class="pill">提案</span>' : ''}${n.syn ? `<br><span class="note">也叫：${esc(n.syn)}</span>` : ''}</td><td class="note">${esc(n.type)}</td><td class="note">${esc(n.path)}</td><td class="num">${n.all}</td><td class="num ${n.ok ? '' : 'zero'}">${n.ok}</td><td class="num ${n.act ? '' : 'zero'}">${n.act}</td></tr>`).join('');
+  $('kgRows').innerHTML = list.map(n => `<tr><td>${esc(n.label)}${n.status === '停用' ? ' <span class="pill 停用">停用</span>' : ''}${n.from === '文件提案' ? ' <span class="pill">提案</span>' : ''}${n.syn ? `<br><span class="note">也叫：${esc(n.syn)}</span>` : ''}</td><td class="note">${esc(n.type)}</td><td class="note">${esc(n.path)}</td><td class="num">${n.all}</td><td class="num ${n.ok ? '' : 'zero'}">${n.ok}</td><td class="num ${n.act ? '' : 'zero'}">${n.act}</td><td class="num note">${n.sub}</td></tr>`).join('');
 }
 $('kgQ').oninput = () => G && !G.empty && renderNodes();
 $('kgF').onchange = () => G && !G.empty && renderNodes();
 $('kgImport').onclick = async () => {
   const f = $('kgFile').files[0]; if (!f) return toast('請選擇 knowledge-graph.json');
   $('kgImport').disabled = true; $('kgImpStatus').textContent = '匯入中…';
-  try { const r = await run('adminImportKG', await f.text()); $('kgImpStatus').textContent = `完成：${r.nodes} 個節點、${r.edges} 條關係、${r.sources} 個來源${r.kept ? `（保留提案節點 ${r.kept} 個）` : ''}`; $('kgFile').value = ''; loadGraph(); }
+  try { const r = await run('adminImportKG', await f.text()); $('kgImpStatus').textContent = `完成：${r.nodes} 個節點、${r.edges} 條關係、${r.sources} 個來源、${r.defs} 筆類型與關係定義${r.kept ? `（保留提案節點 ${r.kept} 個）` : ''}`; $('kgFile').value = ''; loadGraph(); }
   catch (e) { $('kgImpStatus').textContent = '匯入失敗：' + e.message; } finally { $('kgImport').disabled = false; }
 };
 $('kgMap').onclick = async () => {
   const id = $('kgDoc').value; if (!id) return;
   $('kgMap').disabled = true; $('kgMapStatus').textContent = '對應中，可能需要 1–2 分鐘…';
-  try { const r = await run('adminMapDoc', id); $('kgMapStatus').textContent = r.skipped ? r.skipped : `完成：對應 ${r.links} 筆，新候選 ${r.candidates} 個`; loadGraph(); }
+  try { const r = await run('adminMapDoc', id); $('kgMapStatus').textContent = r.skipped ? r.skipped : `完成：標註 ${r.links} 筆（主要 ${r.main}），新候選 ${r.candidates} 個`; loadGraph(); }
   catch (e) { $('kgMapStatus').textContent = '失敗：' + e.message; } finally { $('kgMap').disabled = false; }
 };
 document.querySelector('nav button[data-t="kg"]').addEventListener('click', loadGraph);
