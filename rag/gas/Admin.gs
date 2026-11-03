@@ -99,6 +99,7 @@ function adminCall(token, fn, args) {
     adminUploadDoc: adminUploadDoc, adminDocChunks: adminDocChunks, adminSetChunkType: adminSetChunkType, adminClassifyDoc: adminClassifyDoc,
     adminSetDocStatus: adminSetDocStatus, adminTestChat: adminTestChat, adminLogs: adminLogs, adminLogDetail: adminLogDetail,
     adminEvalList: adminEvalList, adminAddEval: adminAddEval, adminDeleteEval: adminDeleteEval, adminRunEval: adminRunEval,
+    adminImportKG: adminImportKG, adminGraphLoad: adminGraphLoad, adminMapDoc: adminMapDoc, adminCandAction: adminCandAction,
   };
   if (!API[fn]) throw new Error('未知的操作');
   ADMIN_CTX_ = account;
@@ -171,7 +172,13 @@ function adminUploadDoc(p) {
 }
 function adminDocChunks(docId) {
   requireAdmin_();
-  return rows_('chunks').filter(r => String(r['文件ID']) === String(docId)).map(r => ({ id: r['段落ID'], n: r['序號'], page: r['頁碼'], text: r['內容'], status: r['狀態'], type: String(r['類型'] || '') }));
+  const nodes = {}; const label = {};
+  if (kgHasGraph_()) {
+    kgNodes_(true).forEach(n => label[String(n['節點ID'])] = String(n['名稱']));
+    rows_('kgLinks').forEach(l => { const k = String(l['段落ID']); (nodes[k] = nodes[k] || []).push(label[String(l['節點ID'])] || String(l['節點ID'])); });
+  }
+  return rows_('chunks').filter(r => String(r['文件ID']) === String(docId)).map(r => ({ id: r['段落ID'], n: r['序號'], page: r['頁碼'], text: r['內容'], status: r['狀態'], type: String(r['類型'] || ''),
+    nodes: Array.from(new Set(nodes[String(r['段落ID'])] || [])) }));
 }
 /** 修改單一段落的類型 */
 function adminSetChunkType(chunkId, type) {

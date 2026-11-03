@@ -65,6 +65,9 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
 .conv .msg.cur{outline:2px solid var(--accent)}
 .res-命中{color:var(--ok);font-weight:600} .res-未達門檻{color:var(--warn);font-weight:600} .res-沒找到{color:var(--err);font-weight:600}
 .cand-ok{color:var(--ok);font-weight:600}
+.cand{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:8px 0}
+.cand .q{font-size:12px;color:var(--muted);background:var(--bg);border-radius:6px;padding:6px 8px;margin:6px 0;white-space:pre-wrap}
+.zero{color:var(--err)} .nodechip{display:inline-block;font-size:12px;background:var(--soft);color:var(--accent);border-radius:999px;padding:0 8px;margin:2px 4px 0 0}
 </style>
 </head>
 <body>
@@ -72,6 +75,7 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
   <button data-t="bot" class="on">機器人設定</button>
   <button data-t="skill">Skill</button>
   <button data-t="kb">知識庫</button>
+  <button data-t="kg">知識圖譜</button>
   <button data-t="test">測試對話</button>
   <button data-t="logs">對話紀錄</button>
   <button data-t="eval">命中率測試</button>
@@ -198,6 +202,35 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
   <div class="side-b" id="sBody"></div>
 </aside>
 
+<section id="kg">
+  <h3>知識圖譜 <span class="note">圖譜只當「架構」：決定有哪些主題、彼此關係；回答內容仍然來自上傳並核可的文件。目前回答流程尚未使用圖譜。</span></h3>
+  <div id="kgStats" class="kpis"></div>
+  <div class="box">
+    <h4>匯入／更新圖譜</h4>
+    <p class="note">上傳 knowledge-graph.json。只會取代先前「知識圖譜匯入」的節點與關係；專家從文件提案核可的節點會保留，節點的同義說法、停用狀態也會保留。</p>
+    <div class="row"><input type="file" id="kgFile" accept=".json,application/json" style="width:auto"><button class="btn pri" id="kgImport">匯入</button><span class="note" id="kgImpStatus"></span></div>
+  </div>
+  <div class="box">
+    <h4>新節點候選（待審核 <span id="kgCandN">0</span>）</h4>
+    <p class="note">上傳文件時，AI 發現段落內容在現有節點裡找不到合適位置，就會提出候選。多份文件都提到的排前面。核可＝新增節點並掛上這些段落；合併＝把名稱加到既有節點的同義說法；略過＝不處理。</p>
+    <div id="kgCands"></div>
+  </div>
+  <div class="box">
+    <h4>節點覆蓋度 <span class="note">掛接＝有幾段文件對應到這個節點；核可＝其中已核可的段數；做法＝已核可且屬於具體做法／案例／溝通範例的段數</span></h4>
+    <div class="row" style="margin-bottom:8px">
+      <input type="text" id="kgQ" placeholder="搜尋節點名稱或分類" style="max-width:260px">
+      <select id="kgF" style="width:auto"><option value="">全部節點</option><option value="none">還沒有已核可內容</option><option value="noact">沒有具體做法</option><option value="has">已有內容</option><option value="prop">文件提案新增</option></select>
+      <span class="note" id="kgCount"></span>
+    </div>
+    <div class="list" style="max-height:520px"><table><thead><tr><th>節點</th><th>類型</th><th>分類路徑</th><th class="num">掛接</th><th class="num">核可</th><th class="num">做法</th></tr></thead><tbody id="kgRows"></tbody></table></div>
+  </div>
+  <div class="box">
+    <h4>舊文件補對應</h4>
+    <p class="note">在匯入圖譜前就上傳的文件，可以在這裡補做節點對應（只處理還沒對應過的段落）。</p>
+    <div class="row"><select id="kgDoc" style="max-width:360px"></select><button class="btn" id="kgMap">對應節點</button><span class="note" id="kgMapStatus"></span></div>
+  </div>
+</section>
+
 <div id="toast"></div>
 
 <!-- 網頁版登入 -->
@@ -303,7 +336,7 @@ async function docAction(a, id, b) {
       const untyped = cs.filter(c => !c.type).length;
       $('chunkView').innerHTML = `<h3 style="margin-top:18px">段落：${esc(d.title)}（${cs.length} 段）</h3>` +
         `<p class="row note">段落類型用來限制「原則／背景」的比例，讓回答以具體做法為主。${untyped ? `<button class="btn" id="classifyDoc">AI 補分類（${untyped} 段未分類）</button>` : ''}</p>` +
-        cs.map(c => `<div class="chunk"><span class="note">#${c.n}${c.page ? '｜第' + esc(c.page) + '頁' : ''}｜${esc(c.status)}｜類型 <select data-ct="${esc(c.id)}" style="width:auto;padding:2px 6px"><option value="">未分類</option>${TYPES.map(t => `<option ${t === c.type ? 'selected' : ''}>${t}</option>`).join('')}</select></span>\n${esc(c.text)}</div>`).join('');
+        cs.map(c => `<div class="chunk"><span class="note">#${c.n}${c.page ? '｜第' + esc(c.page) + '頁' : ''}｜${esc(c.status)}｜類型 <select data-ct="${esc(c.id)}" style="width:auto;padding:2px 6px"><option value="">未分類</option>${TYPES.map(t => `<option ${t === c.type ? 'selected' : ''}>${t}</option>`).join('')}</select></span>${(c.nodes || []).length ? '\n' + c.nodes.map(n => `<span class="nodechip">${esc(n)}</span>`).join('') : ''}\n${esc(c.text)}</div>`).join('');
       $('chunkView').querySelectorAll('[data-ct]').forEach(sel => sel.onchange = async () => { try { await run('adminSetChunkType', sel.dataset.ct, sel.value); toast('已更新類型'); } catch (e) { toast(e.message, 4000); } });
       const cb = $('classifyDoc'); if (cb) cb.onclick = async () => { cb.disabled = true; cb.textContent = '分類中…'; try { const r = await run('adminClassifyDoc', id); toast(`已分類 ${r.done}／${r.total} 段`); docAction('view', id, b); } catch (e) { toast(e.message, 4000); cb.disabled = false; } };
       $('chunkView').scrollIntoView();
@@ -320,7 +353,8 @@ $('upload').onclick = async () => {
     const p = { title, source: $('dSource').value.trim(), evidence: $('dEv').value, text: f ? '' : text };
     if (f) { p.fileName = f.name; p.mimeType = f.type; p.base64 = await new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1]); r.onerror = no; r.readAsDataURL(f); }); }
     const r = await run('adminUploadDoc', p);
-    $('upStatus').textContent = `完成：切成 ${r.chunks} 段，狀態為「待審核」。請檢查段落後按「核可」。`;
+    const g = r.graph; const gt = !g ? '' : g.error ? `\n節點對應失敗：${g.error}（可到「知識圖譜」分頁補做）` : g.skipped ? '' : `\n已對應知識圖譜 ${g.links} 筆${g.candidates ? `，提出 ${g.candidates} 個新節點候選` : ''}${g.candidateHits ? `，${g.candidateHits} 次呼應既有候選` : ''}（到「知識圖譜」分頁審核）。`;
+    $('upStatus').textContent = `完成：切成 ${r.chunks} 段，狀態為「待審核」。請檢查段落後按「核可」。` + gt; $('upStatus').style.whiteSpace = 'pre-wrap';
     $('dFile').value = ''; $('dText').value = ''; $('dTitle').value = ''; $('dSource').value = '';
     D = await run('adminLoad'); renderDocs();
   } catch (e) { $('upStatus').textContent = '上傳失敗：' + e.message; } finally { $('upload').disabled = false; }
@@ -482,6 +516,69 @@ $('eRun').onclick = async () => {
     $('eStatus').textContent = `完成。${below ? below + ' 題有找到但分數低於門檻（可考慮調低 min_score 或補同義詞）；' : ''}${miss ? miss + ' 題前 10 名都沒有（文件可能缺內容或切段不好）' : ''}`;
   } catch (e) { $('eStatus').textContent = '測試失敗：' + e.message; } finally { $('eRun').disabled = false; }
 };
+
+// ---------- 知識圖譜 ----------
+let G = null;
+async function loadGraph() {
+  try { G = await run('adminGraphLoad'); } catch (e) { $('kgStats').innerHTML = `<p class="bad">${esc(e.message)}</p>`; return; }
+  $('kgDoc').innerHTML = (D && D.docs || []).map(d => `<option value="${esc(d.id)}">${esc(d.title)}（${esc(d.status)}）</option>`).join('');
+  if (G.empty) { $('kgStats').innerHTML = '<p class="note">尚未匯入知識圖譜。請先在下方上傳 knowledge-graph.json（若出現找不到工作表，請先執行 setup()）。</p>'; $('kgCands').innerHTML = ''; $('kgRows').innerHTML = ''; $('kgCandN').textContent = 0; return; }
+  const s = G.stats;
+  const k = (n, l, sm) => `<div class="kpi"><b>${n}</b><span>${l}</span>${sm ? `<small>${sm}</small>` : ''}</div>`;
+  $('kgStats').innerHTML = k(s.nodes, '節點') + k(s.edges, '關係') + k(s.sources, '來源') + k(s.links, '段落對應') + k(s.covered + '／' + s.nodes, '有已核可內容的節點', Math.round(s.covered / Math.max(1, s.nodes) * 100) + '%') + k(s.pending, '待審核候選');
+  renderCands(); renderNodes();
+}
+function nodeOptions(sel) { return '<option value="">（無上層）</option>' + G.nodes.filter(n => n.status !== '停用').map(n => `<option value="${esc(n.id)}" ${n.id === sel ? 'selected' : ''}>${esc(n.label)}｜${esc(n.path.split(' > ').slice(-1)[0] || '')}</option>`).join(''); }
+function renderCands() {
+  $('kgCandN').textContent = G.cands.length;
+  $('kgCands').innerHTML = G.cands.map(c => `<div class="cand" data-id="${esc(c.id)}">
+    <div class="row" style="justify-content:space-between"><b>${esc(c.name)}</b><span class="note">${c.count} 次提到｜來自：${esc(c.doc)}</span></div>
+    <div class="note">${esc(c.def)}</div>
+    ${c.reason ? `<div class="note">AI 理由：${esc(c.reason)}</div>` : ''}
+    ${c.rel ? `<div class="note">建議關係：本節點 → ${esc(c.rel.label)} → ${esc(c.rel.targetLabel)}</div>` : ''}
+    ${c.snippet ? `<div class="q">${esc(c.snippet)}…</div>` : ''}
+    <div class="grid3" style="margin-top:6px">
+      <div><label>名稱</label><input type="text" data-f="name" value="${esc(c.name)}"></div>
+      <div><label>上層節點</label><select data-f="parent">${nodeOptions(c.parent)}</select></div>
+      <div><label>類型</label><select data-f="type">${['概念','實務策略','理論','障礙與需求類別','法規課綱','課程取向','子分類'].map(t => `<option ${t === c.type ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+    </div>
+    <label>定義</label><input type="text" data-f="def" value="${esc(c.def)}">
+    <div class="row" style="margin-top:8px">
+      <button class="btn pri" data-a="approve">核可為新節點</button>
+      <select data-f="target" style="width:auto;max-width:260px">${nodeOptions('').replace('（無上層）', '合併到…')}</select><button class="btn" data-a="merge">合併</button>
+      <button class="btn" data-a="skip">略過</button>
+    </div></div>`).join('') || '<p class="note">目前沒有待審核的候選。</p>';
+  $('kgCands').querySelectorAll('button[data-a]').forEach(b => b.onclick = async () => {
+    const box = b.closest('.cand'); const f = n => box.querySelector(`[data-f="${n}"]`).value;
+    const a = b.dataset.a; const opts = a === 'approve' ? { name: f('name'), parent: f('parent'), type: f('type'), def: f('def') } : a === 'merge' ? { target: f('target') } : {};
+    if (a === 'merge' && !opts.target) return toast('請先選擇要合併到的節點');
+    box.querySelectorAll('button').forEach(x => x.disabled = true);
+    try { await run('adminCandAction', box.dataset.id, a, opts); toast(a === 'approve' ? '已新增節點' : a === 'merge' ? '已合併' : '已略過'); loadGraph(); }
+    catch (e) { toast(e.message, 4000); box.querySelectorAll('button').forEach(x => x.disabled = false); }
+  });
+}
+function renderNodes() {
+  const q = $('kgQ').value.trim(), f = $('kgF').value;
+  const list = G.nodes.filter(n => (!q || (n.label + n.path + n.syn).includes(q)) &&
+    (!f || (f === 'none' && n.ok === 0) || (f === 'noact' && n.act === 0) || (f === 'has' && n.ok > 0) || (f === 'prop' && n.from === '文件提案')));
+  $('kgCount').textContent = `${list.length} 個節點`;
+  $('kgRows').innerHTML = list.map(n => `<tr><td>${esc(n.label)}${n.status === '停用' ? ' <span class="pill 停用">停用</span>' : ''}${n.from === '文件提案' ? ' <span class="pill">提案</span>' : ''}${n.syn ? `<br><span class="note">也叫：${esc(n.syn)}</span>` : ''}</td><td class="note">${esc(n.type)}</td><td class="note">${esc(n.path)}</td><td class="num">${n.all}</td><td class="num ${n.ok ? '' : 'zero'}">${n.ok}</td><td class="num ${n.act ? '' : 'zero'}">${n.act}</td></tr>`).join('');
+}
+$('kgQ').oninput = () => G && !G.empty && renderNodes();
+$('kgF').onchange = () => G && !G.empty && renderNodes();
+$('kgImport').onclick = async () => {
+  const f = $('kgFile').files[0]; if (!f) return toast('請選擇 knowledge-graph.json');
+  $('kgImport').disabled = true; $('kgImpStatus').textContent = '匯入中…';
+  try { const r = await run('adminImportKG', await f.text()); $('kgImpStatus').textContent = `完成：${r.nodes} 個節點、${r.edges} 條關係、${r.sources} 個來源${r.kept ? `（保留提案節點 ${r.kept} 個）` : ''}`; $('kgFile').value = ''; loadGraph(); }
+  catch (e) { $('kgImpStatus').textContent = '匯入失敗：' + e.message; } finally { $('kgImport').disabled = false; }
+};
+$('kgMap').onclick = async () => {
+  const id = $('kgDoc').value; if (!id) return;
+  $('kgMap').disabled = true; $('kgMapStatus').textContent = '對應中，可能需要 1–2 分鐘…';
+  try { const r = await run('adminMapDoc', id); $('kgMapStatus').textContent = r.skipped ? r.skipped : `完成：對應 ${r.links} 筆，新候選 ${r.candidates} 個`; loadGraph(); }
+  catch (e) { $('kgMapStatus').textContent = '失敗：' + e.message; } finally { $('kgMap').disabled = false; }
+};
+document.querySelector('nav button[data-t="kg"]').addEventListener('click', loadGraph);
 
 $('loginForm').onsubmit = async (e) => {
   e.preventDefault(); $('lgBtn').disabled = true; $('lgErr').textContent = '';

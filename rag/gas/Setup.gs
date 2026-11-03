@@ -95,6 +95,7 @@ const SETTINGS_DEFAULT = [
     ['knowledge_only', true, '只用知識庫回答：開＝知識不足時保守回答；關＝知識不足時由 AI 協助補足（照樣檢查，並標示「知識庫內容不足」）'],
     ['enable_relevance_check', true, '是否檢查回答有沒有直接回應老師的提問焦點（L5 關閉時也可單獨啟用）'],
     ['enable_rerank', true, '是否用 AI 依「能不能回答提問焦點」重新排序檢索結果（每題多一次 AI 呼叫）'],
+    ['enable_node_mapping', true, '上傳文件時，AI 把每段對應到知識圖譜節點，並提出新節點候選（需先在後台匯入知識圖譜；每份文件多幾次 AI 呼叫）'],
     ['rerank_pool', 12, '重新排序前先取幾段候選'],
     ['quota_min_actionable', 3, '採用的段落中，至少保留幾段「具體做法／案例／溝通範例」'],
     ['quota_max_principle', 2, '採用的段落中，「原則／背景」最多幾段'],
@@ -158,6 +159,11 @@ function setup() {
   make(SHEETS.admins, ['Email', '備註', '帳號', '密碼雜湊', '鹽'], me ? [[me, '建立者', '', '', '']] : []);
   make(SHEETS.logs, ['時間', 'Session', '園所', '輪次', '老師訊息（去識別化）', '分流', '轉介', '回應類型', '回答', '引用', '檢查', '是否重寫', '耗時ms', '檢索段數', '最高相似度', '被引用段數', '載入Skill', '流程紀錄']);
   make(SHEETS.feedback, ['時間', 'Session', '輪次', '類型', '備註']);
+  make(SHEETS.kgNodes, ['節點ID', '名稱', '類型', '上層', '路徑', '定義', '實務要點', '來源ID', '同義說法', '狀態', '來源', '新增時間']);
+  make(SHEETS.kgEdges, ['主詞', '關係', '受詞', '關係說明', '來源']);
+  make(SHEETS.kgSources, ['來源ID', '標題', '出版單位', '網址', '範圍']);
+  make(SHEETS.kgLinks, ['段落ID', '節點ID', '方式', '時間']);
+  make(SHEETS.kgCands, ['候選ID', '名稱', '定義', '建議上層', '類型', '建議關係', '文件ID', '段落ID', '次數', '理由', '狀態', '處理結果', '審核者', '審核時間']);
   make(SHEETS.evalset, ['測試問題', '應命中文件ID', '備註', '結果', '名次', '最高分', '命中段落', '測試時間']);
   const def = ss.getSheetByName('工作表1') || ss.getSheetByName('Sheet1');
   if (def && def.getLastRow() === 0 && ss.getSheets().length > 1) ss.deleteSheet(def);
