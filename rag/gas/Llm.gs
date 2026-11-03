@@ -9,13 +9,21 @@ function apiKey_() {
 }
 
 /** 建立一個 generateContent 請求（可放進 fetchAll） */
+/** 模型主版本：gemini-2.5-flash → 2.5；gemini-3.1-pro-preview → 3.1；看不出來回傳 0 */
+function modelVer_(model) { const m = String(model || '').match(/gemini-(\d+(?:\.\d+)?)/); return m ? Number(m[1]) : 0; }
+
 function genReq_(model, parts, opts) {
   opts = opts || {};
-  const body = { contents: [{ role: 'user', parts: parts }], generationConfig: { temperature: opts.temperature == null ? 0.3 : opts.temperature } };
+  const v3 = modelVer_(model) >= 3;
+  const body = { contents: [{ role: 'user', parts: parts }], generationConfig: {} };
+  // Gemini 3 以上官方建議溫度維持預設 1.0，調低可能重複或變差，所以不送溫度；2.5 以前照設定
+  if (!v3) body.generationConfig.temperature = opts.temperature == null ? 0.3 : opts.temperature;
   if (opts.json) body.generationConfig.responseMimeType = 'application/json';
   if (opts.maxTokens) body.generationConfig.maxOutputTokens = opts.maxTokens;
-  // 分流、檢查這類單一任務不需要模型「思考」，關掉可省下數秒（只對支援的 2.5 系列模型設定）
-  if (opts.noThink && /2\.5-flash/.test(model)) body.generationConfig.thinkingConfig = { thinkingBudget: 0 };
+  // 分流、檢查這類單一任務不需要模型「思考」，關掉可省下數秒
+  //  2.5 Flash 系列：thinkingBudget 0；3 以上無法完全關閉，用各型號都支援的最低共同等級 low
+  if (opts.noThink && v3) body.generationConfig.thinkingConfig = { thinkingLevel: 'low' };
+  else if (opts.noThink && /2\.5-flash/.test(model)) body.generationConfig.thinkingConfig = { thinkingBudget: 0 };
   return {
     url: GEMINI_BASE + model + ':generateContent', method: 'post', contentType: 'application/json',
     payload: JSON.stringify(body), headers: { 'x-goog-api-key': apiKey_() }, muteHttpExceptions: true,
@@ -26,7 +34,7 @@ function genText_(res) {
   if (res.getResponseCode() !== 200) throw new Error('Gemini ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 200));
   const d = JSON.parse(res.getContentText());
   const parts = (((d.candidates || [])[0] || {}).content || {}).parts || [];
-  return parts.map(p => p.text || '').join('').trim();
+  return parts.filter(p => !p.thought).map(p => p.text || '').join('').trim(); // 略過思考摘要
 }
 
 function parseJson_(text) {
@@ -85,3 +93,21 @@ function quant_(vec) {
 }
 function dequant_(b64) { return Utilities.base64Decode(b64); }
 function normVec_(vec) { let n = 0; vec.forEach(x => n += x * x); n = Math.sqrt(n) || 1; return vec.map(x => x / n); }
+
+/** 列出這把 API 金鑰可用的所有模型（快取 6 小時） */
+function listModels_(force) {
+  const cache = CacheService.getScriptCache();
+  if (!force) { const c = cache.get('models'); if (c) return JSON.parse(c); }
+  const out = []; let token = '';
+  do {
+    const res = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000' + (token ? '&pageToken=' + encodeURIComponent(token) : ''),
+      { headers: { 'x-goog-api-key': apiKey_() }, muteHttpExceptions: true });
+    if (res.getResponseCode() !== 200) throw new Error('讀取模型清單失敗 ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 200));
+    const d = JSON.parse(res.getContentText());
+    (d.models || []).forEach(m => out.push({ id: String(m.name || '').replace(/^models\//, ''), name: m.displayName || '', desc: String(m.description || '').slice(0, 160),
+      methods: m.supportedGenerationMethods || [], input: m.inputTokenLimit || 0, output: m.outputTokenLimit || 0, thinking: !!m.thinking }));
+    token = d.nextPageToken || '';
+  } while (token);
+  try { cache.put('models', JSON.stringify(out), 21600); } catch (e) {}
+  return out;
+}

@@ -99,7 +99,7 @@ function adminCall(token, fn, args) {
     adminUploadDoc: adminUploadDoc, adminDocChunks: adminDocChunks, adminSetChunkType: adminSetChunkType, adminClassifyDoc: adminClassifyDoc,
     adminSetDocStatus: adminSetDocStatus, adminTestChat: adminTestChat, adminLogs: adminLogs, adminLogDetail: adminLogDetail,
     adminEvalList: adminEvalList, adminAddEval: adminAddEval, adminDeleteEval: adminDeleteEval, adminRunEval: adminRunEval,
-    adminImportKG: adminImportKG, adminGraphLoad: adminGraphLoad, adminMapDoc: adminMapDoc, adminCandAction: adminCandAction,
+    adminModels: adminModels, adminPingModel: adminPingModel, adminImportKG: adminImportKG, adminGraphLoad: adminGraphLoad, adminMapDoc: adminMapDoc, adminCandAction: adminCandAction,
   };
   if (!API[fn]) throw new Error('未知的操作');
   ADMIN_CTX_ = account;
@@ -359,4 +359,31 @@ function adminRunEval() {
   const n = list.length;
   return { n: n, hitRate: Math.round(hitN / n * 1000) / 10, mrr: Math.round(rr / n * 1000) / 1000, avgTop: Math.round(topSum / n * 1000) / 1000,
     minScore: Number(cfg_('min_score') || 0.45), topK: Number(cfg_('top_k') || 6), results: results };
+}
+
+// ---------- 模型 ----------
+/** 文字生成用不到的模型（語音、圖片、即時、音樂、機器人…） */
+const MODEL_SKIP = /tts|image|live|audio|transcribe|translate|lyria|imagen|veo|robotics|banana|aqa|omni|deep-research|antigravity|computer-use/i;
+function adminModels(force) {
+  requireAdmin_();
+  const all = listModels_(!!force);
+  const gen = all.filter(m => m.methods.indexOf('generateContent') >= 0 && !MODEL_SKIP.test(m.id));
+  const embed = all.filter(m => m.methods.indexOf('embedContent') >= 0 || m.methods.indexOf('batchEmbedContents') >= 0);
+  const ver = m => modelVer_(m.id);
+  const sort = a => a.sort((x, y) => ver(y) - ver(x) || (/preview|exp/.test(x.id) - /preview|exp/.test(y.id)) || x.id.localeCompare(y.id));
+  return { total: all.length, gen: sort(gen), embed: sort(embed), v3: gen.filter(m => ver(m) >= 3).length };
+}
+/** 用一句話試跑模型，確認這把金鑰真的能用、速度多快 */
+function adminPingModel(model, kind) {
+  requireAdmin_();
+  const t = Date.now();
+  if (kind === 'embed') {
+    const res = UrlFetchApp.fetch(GEMINI_BASE + model + ':embedContent', { method: 'post', contentType: 'application/json', muteHttpExceptions: true, headers: { 'x-goog-api-key': apiKey_() },
+      payload: JSON.stringify({ model: 'models/' + model, content: { parts: [{ text: '測試' }] }, outputDimensionality: Number(cfg_('embed_dim') || 768) }) });
+    if (res.getResponseCode() !== 200) throw new Error(res.getResponseCode() + ': ' + res.getContentText().slice(0, 200));
+    const d = JSON.parse(res.getContentText());
+    return { ok: true, ms: Date.now() - t, reply: '向量維度 ' + (((d.embedding || {}).values || []).length) };
+  }
+  const r = genJson_(model, '只輸出 JSON：{"ok":true,"say":"用一句繁體中文打招呼"}', { temperature: 0, noThink: true });
+  return { ok: true, ms: Date.now() - t, reply: String(r.say || JSON.stringify(r)).slice(0, 60) };
 }

@@ -85,7 +85,7 @@ const SETTINGS_DEFAULT = [
     ['model_rerank', 'gemini-2.5-flash-lite', '重新排序用模型（只打 0–3 分，用較快較省的模型即可；判斷變差可改回 gemini-2.5-flash）'],
     ['model_embed', 'gemini-embedding-001', '向量模型（更換後要重新向量化所有文件）'],
     ['embed_dim', 768, '向量維度'],
-    ['temperature', 0.3, '生成溫度'],
+    ['temperature', 0.3, '生成溫度（只對 Gemini 2.5 以前的模型有效；Gemini 3 以上官方建議維持預設 1.0，系統不送溫度）'],
     ['top_k', 6, '每次檢索取幾段'],
     ['min_score', 0.45, '相似度門檻，低於此值不採用'],
     ['chunk_size', 500, '切段長度（字）'],
