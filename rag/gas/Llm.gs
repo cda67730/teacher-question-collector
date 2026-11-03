@@ -1,19 +1,46 @@
-/** Gemini 呼叫工具：產生、JSON、向量；fetchAll 用來並行執行 */
+/**
+ * 模型呼叫工具：產生、JSON、向量；fetchAll 用來並行執行
+ * 支援 Gemini 與 OpenAI：依模型 ID 自動判斷（gpt-、o1/o3…、text-embedding- 開頭走 OpenAI），其他程式不用改
+ */
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/';
+const OPENAI_BASE = 'https://api.openai.com/v1/';
 
 function apiKey_() {
   const k = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
   if (!k) throw new Error('GEMINI_API_KEY 未設定');
   return k;
 }
+function openaiKey_() {
+  const k = PropertiesService.getScriptProperties().getProperty('OPENAI_API_KEY');
+  if (!k) throw new Error('OPENAI_API_KEY 未設定（專案設定 → 指令碼屬性）');
+  return k;
+}
+function isOpenAI_(model) { return /^(gpt-|o\d|chatgpt-|text-embedding-)/i.test(String(model || '')); }
 
-/** 建立一個 generateContent 請求（可放進 fetchAll） */
+/** OpenAI Chat Completions 請求。推理模型不接受溫度，所以一律不送溫度；不需要思考的任務把推理強度降到最低 */
+function openaiReq_(model, parts, opts) {
+  const content = parts.map(p => p.inline_data
+    ? { type: 'file', file: { filename: 'document.pdf', file_data: 'data:' + p.inline_data.mime_type + ';base64,' + p.inline_data.data } }
+    : { type: 'text', text: p.text });
+  const body = { model: model, messages: [{ role: 'user', content: content }] };
+  if (opts.json) body.response_format = { type: 'json_object' };
+  if (opts.maxTokens) body.max_completion_tokens = opts.maxTokens;
+  // none：GPT-6 Luna、GPT-6 Sol、GPT-6.1 Terra 支援；其他用 low。不接受時 genFix_ 會拿掉重送
+  if (opts.noThink) body.reasoning_effort = /luna|terra|^gpt-6-sol$/.test(model) ? 'none' : 'low';
+  return {
+    url: OPENAI_BASE + 'chat/completions', method: 'post', contentType: 'application/json',
+    payload: JSON.stringify(body), headers: { Authorization: 'Bearer ' + openaiKey_() }, muteHttpExceptions: true,
+  };
+}
+
+/** 建立一個產生請求（可放進 fetchAll） */
 /** 模型主版本：gemini-2.5-flash → 2.5；gemini-3.1-pro-preview → 3.1；看不出來回傳 0 */
 function modelVer_(model) { const m = String(model || '').match(/gemini-(\d+(?:\.\d+)?)/); return m ? Number(m[1]) : 0; }
 
 function genReq_(model, parts, opts) {
   opts = opts || {};
+  if (isOpenAI_(model)) return openaiReq_(model, parts, opts);
   const v3 = modelVer_(model) >= 3;
   const body = { contents: [{ role: 'user', parts: parts }], generationConfig: {} };
   // Gemini 3 以上官方建議溫度維持預設 1.0，調低可能重複或變差，所以不送溫度；2.5 以前照設定
@@ -32,8 +59,9 @@ function genReq_(model, parts, opts) {
 }
 
 function genText_(res) {
-  if (res.getResponseCode() !== 200) throw new Error('Gemini ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 200));
+  if (res.getResponseCode() !== 200) throw new Error('模型 API ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 200));
   const d = JSON.parse(res.getContentText());
+  if (d.choices) return String((((d.choices[0] || {}).message) || {}).content || '').trim(); // OpenAI
   const parts = (((d.candidates || [])[0] || {}).content || {}).parts || [];
   return parts.filter(p => !p.thought).map(p => p.text || '').join('').trim(); // 略過思考摘要
 }
@@ -52,9 +80,10 @@ function gen_(model, prompt, opts) {
 
 /** 新模型不接受某些參數（思考設定、溫度）而回 400 時，拿掉這些參數重送一次 */
 function genFix_(req, res) {
-  if (res.getResponseCode() !== 400 || !/thinking|temperature|top_?p|top_?k/i.test(res.getContentText())) return res;
+  if (res.getResponseCode() !== 400 || !/thinking|temperature|top_?p|top_?k|reasoning|unsupported/i.test(res.getContentText())) return res;
   const body = JSON.parse(req.payload);
-  ['thinkingConfig', 'temperature', 'topP', 'topK'].forEach(k => delete body.generationConfig[k]);
+  if (body.generationConfig) ['thinkingConfig', 'temperature', 'topP', 'topK'].forEach(k => delete body.generationConfig[k]);
+  ['reasoning_effort', 'temperature', 'top_p'].forEach(k => delete body[k]);
   const a = reqArgs_(Object.assign({}, req, { payload: JSON.stringify(body) }));
   console.warn('模型不接受部分參數，已拿掉後重送：' + req.url);
   return UrlFetchApp.fetch(a[0], a[1]);
@@ -69,6 +98,14 @@ function embedReqs_(texts, taskType) {
   const model = cfg_('model_embed');
   const dim = Number(cfg_('embed_dim') || 768);
   const reqs = [];
+  if (isOpenAI_(model)) {
+    for (let i = 0; i < texts.length; i += 100) reqs.push({
+      url: OPENAI_BASE + 'embeddings', method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+      payload: JSON.stringify({ model: model, input: texts.slice(i, i + 100).map(t => String(t).slice(0, 8000)), dimensions: dim }),
+      headers: { Authorization: 'Bearer ' + openaiKey_() },
+    });
+    return reqs;
+  }
   for (let i = 0; i < texts.length; i += 100) {
     const batch = texts.slice(i, i + 100).map(t => ({
       model: 'models/' + model, content: { parts: [{ text: String(t).slice(0, 8000) }] }, taskType: taskType, outputDimensionality: dim,
@@ -82,7 +119,9 @@ function embedReqs_(texts, taskType) {
 }
 function embedParse_(res) {
   if (res.getResponseCode() !== 200) throw new Error('Embedding ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 200));
-  return JSON.parse(res.getContentText()).embeddings.map(e => e.values);
+  const d = JSON.parse(res.getContentText());
+  if (d.data) return d.data.sort((a, b) => a.index - b.index).map(e => e.embedding); // OpenAI
+  return d.embeddings.map(e => e.values);
 }
 function embedTexts_(texts, taskType) {
   if (!texts.length) return [];
@@ -120,5 +159,16 @@ function listModels_(force) {
     token = d.nextPageToken || '';
   } while (token);
   try { cache.put('models', JSON.stringify(out), 21600); } catch (e) {}
+  return out;
+}
+
+/** 列出 OpenAI 金鑰可用的模型（API 只給 ID，沒有能力說明；快取 6 小時） */
+function listOpenAIModels_(force) {
+  const cache = CacheService.getScriptCache();
+  if (!force) { const c = cache.get('models_oa'); if (c) return JSON.parse(c); }
+  const res = UrlFetchApp.fetch(OPENAI_BASE + 'models', { headers: { Authorization: 'Bearer ' + openaiKey_() }, muteHttpExceptions: true });
+  if (res.getResponseCode() !== 200) throw new Error('讀取 OpenAI 模型清單失敗 ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 200));
+  const out = (JSON.parse(res.getContentText()).data || []).map(m => ({ id: String(m.id), name: '', desc: '', methods: [], input: 0, provider: 'openai' }));
+  try { cache.put('models_oa', JSON.stringify(out), 21600); } catch (e) {}
   return out;
 }

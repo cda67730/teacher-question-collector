@@ -364,19 +364,42 @@ function adminRunEval() {
 // ---------- 模型 ----------
 /** 文字生成用不到的模型（語音、圖片、即時、音樂、機器人…） */
 const MODEL_SKIP = /tts|image|live|audio|transcribe|translate|lyria|imagen|veo|robotics|banana|aqa|omni|deep-research|antigravity|computer-use/i;
+/** OpenAI 清單只有 ID：用名稱判斷哪些能拿來產生文字 */
+const OA_SKIP = /audio|realtime|tts|transcribe|whisper|image|dall-e|sora|search|moderation|embedding|babbage|davinci|instruct|codex|computer-use|chat-latest|deep-research/i;
 function adminModels(force) {
   requireAdmin_();
-  const all = listModels_(!!force);
-  const gen = all.filter(m => m.methods.indexOf('generateContent') >= 0 && !MODEL_SKIP.test(m.id));
-  const embed = all.filter(m => m.methods.indexOf('embedContent') >= 0 || m.methods.indexOf('batchEmbedContents') >= 0);
   const ver = m => modelVer_(m.id);
   const sort = a => a.sort((x, y) => ver(y) - ver(x) || (/preview|exp/.test(x.id) - /preview|exp/.test(y.id)) || x.id.localeCompare(y.id));
-  return { total: all.length, gen: sort(gen), embed: sort(embed), v3: gen.filter(m => ver(m) >= 3).length };
+  const out = { total: 0, gen: [], embed: [], v3: 0, oa: 0, oaTotal: 0, errors: [] };
+  try {
+    const all = listModels_(!!force);
+    out.total = all.length;
+    out.gen = sort(all.filter(m => m.methods.indexOf('generateContent') >= 0 && !MODEL_SKIP.test(m.id)));
+    out.embed = sort(all.filter(m => m.methods.indexOf('embedContent') >= 0 || m.methods.indexOf('batchEmbedContents') >= 0));
+    out.v3 = out.gen.filter(m => ver(m) >= 3).length;
+  } catch (e) { out.errors.push('Gemini：' + e.message); }
+  try {
+    const oa = listOpenAIModels_(!!force);
+    const oaVer = id => { const m = id.match(/^gpt-(\d+(?:\.\d+)?)/); return m ? Number(m[1]) : 0; };
+    // 有日期後綴的快照（例如 gpt-5-2025-08-07）不列，避免清單太長
+    const gen = oa.filter(m => /^(gpt-|o\d)/.test(m.id) && !OA_SKIP.test(m.id) && !/-\d{4}-\d{2}-\d{2}$/.test(m.id))
+      .sort((a, b) => oaVer(b.id) - oaVer(a.id) || a.id.localeCompare(b.id));
+    out.oaTotal = oa.length; out.oa = gen.length;
+    out.gen = out.gen.concat(gen);
+    out.embed = out.embed.concat(oa.filter(m => /^text-embedding-3/.test(m.id)));
+  } catch (e) { out.errors.push('OpenAI：' + e.message); }
+  if (!out.gen.length && out.errors.length) throw new Error(out.errors.join('；'));
+  return out;
 }
 /** 用一句話試跑模型，確認這把金鑰真的能用、速度多快 */
 function adminPingModel(model, kind) {
   requireAdmin_();
   const t = Date.now();
+  if (kind === 'embed' && isOpenAI_(model)) {
+    const v = embedParse_(UrlFetchApp.fetch(OPENAI_BASE + 'embeddings', { method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+      headers: { Authorization: 'Bearer ' + openaiKey_() }, payload: JSON.stringify({ model: model, input: ['測試'], dimensions: Number(cfg_('embed_dim') || 768) }) }))[0];
+    return { ok: true, ms: Date.now() - t, reply: '向量維度 ' + v.length };
+  }
   if (kind === 'embed') {
     const res = UrlFetchApp.fetch(GEMINI_BASE + model + ':embedContent', { method: 'post', contentType: 'application/json', muteHttpExceptions: true, headers: { 'x-goog-api-key': apiKey_() },
       payload: JSON.stringify({ model: 'models/' + model, content: { parts: [{ text: '測試' }] }, outputDimensionality: Number(cfg_('embed_dim') || 768) }) });

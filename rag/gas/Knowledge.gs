@@ -52,10 +52,10 @@ function classifyChunks_(texts) {
   for (let i = 0; i < texts.length; i += 25) {
     const group = texts.slice(i, i + 25);
     try {
-      const r = genJson_(cfg_('model_triage'), '把每一段幼教知識分成一種類型，只輸出 JSON 陣列，順序與段落相同。類型：' + JSON.stringify(CHUNK_TYPES) +
+      const r = genJson_(cfg_('model_triage'), '把每一段幼教知識分成一種類型，只輸出 JSON，types 陣列順序與段落相同。類型：' + JSON.stringify(CHUNK_TYPES) +
         '。具體做法＝老師可以直接照做的步驟或策略；案例＝具體情境的處理實例；溝通範例＝可直接使用的說法或訊息；原則／背景＝理論、原則、概念說明；轉介資訊＝找誰、流程、資源。\n' +
-        '格式：["具體做法","原則／背景",…]\n\n' + group.map((t, j) => '【段落' + (j + 1) + '】\n' + String(t).slice(0, 700)).join('\n\n'), { temperature: 0, noThink: true });
-      (Array.isArray(r) ? r : (r.types || [])).forEach((t, j) => { if (CHUNK_TYPES.indexOf(t) >= 0) out[i + j] = t; });
+        '格式：{"types":["具體做法","原則／背景",…]}\n\n' + group.map((t, j) => '【段落' + (j + 1) + '】\n' + String(t).slice(0, 700)).join('\n\n'), { temperature: 0, noThink: true });
+      (Array.isArray(r) ? r : (r.types || Object.values(r).find(Array.isArray) || [])).forEach((t, j) => { if (CHUNK_TYPES.indexOf(t) >= 0) out[i + j] = t; });
     } catch (e) { console.warn('分類失敗', e); }
   }
   return out;

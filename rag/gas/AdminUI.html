@@ -88,9 +88,9 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
   <h3>機器人設定 <span class="note">修改後按儲存，約 1 分鐘內生效</span></h3>
   <div class="box" id="modelBox">
     <div class="row" style="justify-content:space-between"><h4 style="margin:0">可用模型 <span class="note" id="modelSum">讀取中…</span></h4>
-      <div class="row"><button class="btn" data-preset="g3" style="padding:4px 10px;font-size:12px">套用 Gemini 3 組合</button><button class="btn" data-preset="g25" style="padding:4px 10px;font-size:12px">還原 2.5 組合</button><button class="btn" id="modelList" style="padding:4px 10px;font-size:12px">看清單</button><button class="btn" id="modelRefresh" style="padding:4px 10px;font-size:12px">重新讀取</button></div></div>
+      <div class="row"><button class="btn" data-preset="g3" style="padding:4px 10px;font-size:12px">套用 Gemini 3 組合</button><button class="btn" data-preset="oa" style="padding:4px 10px;font-size:12px">套用 OpenAI 組合</button><button class="btn" data-preset="g25" style="padding:4px 10px;font-size:12px">還原 2.5 組合</button><button class="btn" id="modelList" style="padding:4px 10px;font-size:12px">看清單</button><button class="btn" id="modelRefresh" style="padding:4px 10px;font-size:12px">重新讀取</button></div></div>
     <p class="note" style="margin:4px 0 0">清單直接向 Gemini API 查詢這把金鑰能用的模型。下方 model_ 開頭的設定可直接選；選好可按「測試」確認能用與速度。Gemini 3 以上會自動改用官方建議的參數（溫度維持預設、思考等級 low）。</p>
-    <p class="note" style="margin:4px 0 0">Gemini 3 組合：分流與重排用 3.1 Flash-Lite（快、省），回答用 3.8 Flash，檢查用 3.6 Flash。套用後會直接儲存，可再逐一測試。</p>
+    <p class="note" style="margin:4px 0 0">Gemini 3 組合：分流與重排用 3.1 Flash-Lite（快、省），回答用 3.8 Flash，檢查用 3.6 Flash。OpenAI 組合：分流與重排用 GPT-6 Luna，回答與檢查用 GPT-6.1 Terra（同系列幻覺率最低）。套用後會直接儲存，可再逐一測試。向量模型不在組合內，要換需重新上傳文件。用 OpenAI 要先在指令碼屬性加 OPENAI_API_KEY。</p>
     <div id="modelTable" hidden style="margin-top:8px;max-height:360px;overflow:auto"></div>
   </div>
   <div id="settings"></div>
@@ -307,7 +307,7 @@ function fillModelSelects() {
     const cur = sel.value, list = sel.dataset.model === 'embed' ? MODELS.embed : MODELS.gen;
     const has = list.some(m => m.id === cur);
     const groups = {};
-    list.forEach(m => { const v = modelVer_(m.id); const g = v >= 3 ? 'Gemini ' + Math.floor(v) + ' 系列' : v ? 'Gemini ' + v : '其他'; (groups[g] = groups[g] || []).push(m); });
+    list.forEach(m => { const v = modelVer_(m.id); const g = m.provider === 'openai' ? 'OpenAI' : v >= 3 ? 'Gemini ' + Math.floor(v) + ' 系列' : v ? 'Gemini ' + v : '其他'; (groups[g] = groups[g] || []).push(m); });
     sel.innerHTML = (has ? '' : `<option value="${esc(cur)}">${esc(cur)}（目前設定，清單中沒有）</option>`) +
       Object.keys(groups).map(g => `<optgroup label="${esc(g)}">${groups[g].map(m => `<option value="${esc(m.id)}" ${m.id === cur ? 'selected' : ''}>${esc(mLabel(m))}${/preview|exp/.test(m.id) ? '（預覽）' : ''}</option>`).join('')}</optgroup>`).join('');
   });
@@ -317,15 +317,17 @@ async function loadModels(force) {
   $('modelSum').textContent = '讀取中…';
   try {
     MODELS = await run('adminModels', !!force);
-    $('modelSum').textContent = `這把金鑰共 ${MODELS.total} 個模型；可用於文字生成 ${MODELS.gen.length} 個（Gemini 3 以上 ${MODELS.v3} 個），向量 ${MODELS.embed.length} 個`;
+    const gN = MODELS.gen.length - MODELS.oa;
+    $('modelSum').textContent = `Gemini：文字生成 ${gN} 個（3 以上 ${MODELS.v3} 個）｜OpenAI：文字生成 ${MODELS.oa} 個｜向量共 ${MODELS.embed.length} 個` + (MODELS.errors.length ? `｜${MODELS.errors.join('；')}` : '');
     fillModelSelects();
-    const row = m => `<tr><td>${esc(m.id)}</td><td>${esc(m.name)}</td><td class="num">${m.input ? Math.round(m.input / 1000) + 'K' : ''}</td><td class="note">${esc(m.desc)}</td></tr>`;
+    const row = m => `<tr><td>${esc(m.id)}</td><td>${esc(m.name || (m.provider === 'openai' ? 'OpenAI' : ''))}</td><td class="num">${m.input ? Math.round(m.input / 1000) + 'K' : ''}</td><td class="note">${esc(m.desc)}</td></tr>`;
     $('modelTable').innerHTML = `<table><thead><tr><th>文字生成模型 ID</th><th>名稱</th><th class="num">輸入上限</th><th>說明</th></tr></thead><tbody>${MODELS.gen.map(row).join('')}</tbody></table>` +
       `<table style="margin-top:8px"><thead><tr><th>向量模型 ID</th><th>名稱</th><th class="num">輸入上限</th><th>說明</th></tr></thead><tbody>${MODELS.embed.map(row).join('')}</tbody></table>`;
   } catch (e) { $('modelSum').textContent = '讀取失敗：' + e.message; }
 }
 const PRESETS = {
   g3: { model_triage: 'gemini-3.1-flash-lite', model_rerank: 'gemini-3.1-flash-lite', model_answer: 'gemini-3.8-flash', model_check: 'gemini-3.6-flash' },
+  oa: { model_triage: 'gpt-6-luna', model_rerank: 'gpt-6-luna', model_answer: 'gpt-6.1-terra', model_check: 'gpt-6.1-terra' },
   g25: { model_triage: 'gemini-2.5-flash', model_rerank: 'gemini-2.5-flash-lite', model_answer: 'gemini-2.5-flash', model_check: 'gemini-2.5-flash' },
 };
 document.querySelectorAll('[data-preset]').forEach(b => b.onclick = async () => {
