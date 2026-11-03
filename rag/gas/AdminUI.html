@@ -225,9 +225,12 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
     <div class="list" style="max-height:520px"><table><thead><tr><th>節點</th><th>類型</th><th>分類路徑</th><th class="num">主要</th><th class="num">核可</th><th class="num">做法</th><th class="num">次要</th></tr></thead><tbody id="kgRows"></tbody></table></div>
   </div>
   <div class="box">
-    <h4>舊文件補對應</h4>
-    <p class="note">在匯入圖譜前就上傳的文件，可以在這裡補做節點對應（只處理還沒對應過的段落）。</p>
-    <div class="row"><select id="kgDoc" style="max-width:360px"></select><button class="btn" id="kgMap">對應節點</button><span class="note" id="kgMapStatus"></span></div>
+    <h4>標註文件</h4>
+    <label style="font-weight:400"><input type="checkbox" id="kgAuto"> 上傳文件時就標註</label>
+    <p class="note">建議先關閉：累積一定數量的文件後，再一次標註。這樣可以先看完所有新節點候選、調整好圖譜，標註只做一次，用詞也比較一致。關閉時上傳的文件不受影響，之後隨時可以補標。</p>
+    <div class="row"><button class="btn pri" id="kgMapAll">標註所有未標註文件</button><span class="note" id="kgTodo"></span></div>
+    <div class="row" style="margin-top:8px"><select id="kgDoc" style="max-width:360px"></select><button class="btn" id="kgMap">只標這份</button></div>
+    <p class="note" id="kgMapStatus" style="white-space:pre-wrap"></p>
   </div>
 </section>
 
@@ -521,8 +524,13 @@ $('eRun').onclick = async () => {
 let G = null;
 async function loadGraph() {
   try { G = await run('adminGraphLoad'); } catch (e) { $('kgStats').innerHTML = `<p class="bad">${esc(e.message)}</p>`; return; }
-  $('kgDoc').innerHTML = (D && D.docs || []).map(d => `<option value="${esc(d.id)}">${esc(d.title)}（${esc(d.status)}）</option>`).join('');
-  if (G.empty) { $('kgStats').innerHTML = '<p class="note">尚未匯入知識圖譜。請先在下方上傳 knowledge-graph.json（若出現找不到工作表，請先執行 setup()）。</p>'; $('kgCands').innerHTML = ''; $('kgRows').innerHTML = ''; $('kgCandN').textContent = 0; return; }
+  const ms = (D && D.settings || []).find(s => s.key === 'enable_node_mapping');
+  $('kgAuto').checked = !!ms && String(ms.value).toUpperCase() === 'TRUE'; $('kgAuto').disabled = !ms;
+  const todo = G.todo || [];
+  $('kgDoc').innerHTML = todo.map(d => `<option value="${esc(d.id)}">${esc(d.title)}（${esc(d.status)}，${d.todo} 段未標）</option>`).join('') || '<option value="">（全部文件都已標註）</option>';
+  $('kgTodo').textContent = todo.length ? `${todo.length} 份文件、共 ${todo.reduce((a, d) => a + d.todo, 0)} 段未標註` : '全部文件都已標註';
+  $('kgMapAll').disabled = !todo.length;
+  if (G.empty) { $('kgMapAll').disabled = true; $('kgTodo').textContent = '需先匯入圖譜'; $('kgStats').innerHTML = '<p class="note">尚未匯入知識圖譜。請先在下方上傳 knowledge-graph.json（若出現找不到工作表，請先執行 setup()）。</p>'; $('kgCands').innerHTML = ''; $('kgRows').innerHTML = ''; $('kgCandN').textContent = 0; return; }
   const s = G.stats;
   const k = (n, l, sm) => `<div class="kpi"><b>${n}</b><span>${l}</span>${sm ? `<small>${sm}</small>` : ''}</div>`;
   $('kgStats').innerHTML = k(s.nodes, '節點') + k(s.edges, '關係') + k(s.sources, '來源') + k(s.links, '段落對應') + k(s.covered + '／' + s.nodes, '有已核可內容的節點', Math.round(s.covered / Math.max(1, s.nodes) * 100) + '%') + k(s.pending, '待審核候選');
@@ -583,6 +591,23 @@ $('kgImport').onclick = async () => {
   $('kgImport').disabled = true; $('kgImpStatus').textContent = '匯入中…';
   try { const r = await run('adminImportKG', await f.text()); $('kgImpStatus').textContent = `完成：${r.nodes} 個節點、${r.edges} 條關係、${r.sources} 個來源、${r.defs} 筆類型與關係定義${r.kept ? `（保留提案節點 ${r.kept} 個）` : ''}`; $('kgFile').value = ''; loadGraph(); }
   catch (e) { $('kgImpStatus').textContent = '匯入失敗：' + e.message; } finally { $('kgImport').disabled = false; }
+};
+$('kgAuto').onchange = async () => {
+  const on = $('kgAuto').checked;
+  try { await run('adminSaveSettings', [{ key: 'enable_node_mapping', value: on }]); const s = D.settings.find(x => x.key === 'enable_node_mapping'); if (s) s.value = on; renderSettings(); toast(on ? '已開啟：上傳時就標註' : '已關閉：上傳時不標註'); }
+  catch (e) { $('kgAuto').checked = !on; toast(e.message, 4000); }
+};
+// 一份一份送，避免單次執行超過 Apps Script 6 分鐘上限
+$('kgMapAll').onclick = async () => {
+  const todo = (G && G.todo) || []; if (!todo.length) return;
+  $('kgMapAll').disabled = true; $('kgMap').disabled = true; let links = 0, cands = 0, fail = [];
+  for (let i = 0; i < todo.length; i++) {
+    $('kgMapStatus').textContent = `標註中 ${i + 1}／${todo.length}：${todo[i].title}…`;
+    try { const r = await run('adminMapDoc', todo[i].id); links += r.links || 0; cands += r.candidates || 0; }
+    catch (e) { fail.push(todo[i].title + '：' + e.message); }
+  }
+  $('kgMapStatus').textContent = `完成：標註 ${links} 筆，新候選 ${cands} 個。` + (fail.length ? `\n失敗 ${fail.length} 份（可再按一次補標）：\n` + fail.join('\n') : '');
+  $('kgMap').disabled = false; loadGraph();
 };
 $('kgMap').onclick = async () => {
   const id = $('kgDoc').value; if (!id) return;

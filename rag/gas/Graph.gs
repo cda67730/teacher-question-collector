@@ -215,6 +215,12 @@ function kgMapDocument_(docId) {
   if (!chunks.length) return { links: 0, main: 0, candidates: 0, candidateHits: 0 };
   return kgSaveMapping_(docId, kgMapChunks_(String(doc['標題'] || ''), chunks));
 }
+/** 還有未標註段落的文件：[{id, title, status, todo}] */
+function kgTodoDocs_(links) {
+  const done = {}; (links || rows_('kgLinks')).forEach(r => done[String(r['段落ID'])] = true);
+  const n = {}; rows_('chunks').forEach(r => { if (!done[String(r['段落ID'])] && String(r['狀態']) !== '停用') n[String(r['文件ID'])] = (n[String(r['文件ID'])] || 0) + 1; });
+  return rows_('docs').filter(d => n[String(d['文件ID'])] && String(d['狀態']) !== '停用').map(d => ({ id: String(d['文件ID']), title: String(d['標題']), status: String(d['狀態']), todo: n[String(d['文件ID'])] }));
+}
 function adminMapDoc(docId) { requireAdmin_(); return kgMapDocument_(docId); }
 
 // ---------- 後台：總覽、覆蓋度、候選 ----------
@@ -253,7 +259,7 @@ function adminGraphLoad() {
   return {
     stats: { nodes: nodes.filter(r => String(r['狀態'] || '啟用') !== '停用').length, edges: edges.length, sources: Math.max(0, sh_('kgSources').getLastRow() - 1),
       links: links.length, covered: list.filter(n => n.ok > 0).length, pending: cands.length },
-    nodes: list, cands: cands, types: kgNewTypes_(defs), pairs: pairs, nodeTypes: nodeTypes,
+    nodes: list, cands: cands, types: kgNewTypes_(defs), pairs: pairs, nodeTypes: nodeTypes, todo: kgTodoDocs_(links),
   };
 }
 

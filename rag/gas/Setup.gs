@@ -95,7 +95,7 @@ const SETTINGS_DEFAULT = [
     ['knowledge_only', true, '只用知識庫回答：開＝知識不足時保守回答；關＝知識不足時由 AI 協助補足（照樣檢查，並標示「知識庫內容不足」）'],
     ['enable_relevance_check', true, '是否檢查回答有沒有直接回應老師的提問焦點（L5 關閉時也可單獨啟用）'],
     ['enable_rerank', true, '是否用 AI 依「能不能回答提問焦點」重新排序檢索結果（每題多一次 AI 呼叫）'],
-    ['enable_node_mapping', true, '上傳文件時，AI 照 ontology 的標註規格標每一段（主要／次要節點、讀者對象、適用年齡、情境），並提出新節點候選（需先在後台匯入知識圖譜；每份文件多幾次 AI 呼叫）'],
+    ['enable_node_mapping', false, '上傳文件時就標註（預設關閉：先累積文件，之後在「知識圖譜」分頁一次標註）。開啟時，AI 照 ontology 的標註規格標每一段（主要／次要節點、讀者對象、適用年齡、情境），並提出新節點候選（需先在後台匯入知識圖譜；每份文件多幾次 AI 呼叫）'],
     ['rerank_pool', 12, '重新排序前先取幾段候選'],
     ['quota_min_actionable', 3, '採用的段落中，至少保留幾段「具體做法／案例／溝通範例」'],
     ['quota_max_principle', 2, '採用的段落中，「原則／背景」最多幾段'],

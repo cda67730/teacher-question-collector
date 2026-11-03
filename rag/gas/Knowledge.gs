@@ -74,7 +74,7 @@ function addDocument_(meta, text, user) {
   // 有匯入知識圖譜時，順便把段落對應到節點、提出新節點候選（失敗不影響上傳）
   let graph = null;
   const nm = cfg_('enable_node_mapping');
-  if ((nm === undefined || nm === '' || truthy_(nm)) && kgHasGraph_()) {
+  if (truthy_(nm) && kgHasGraph_()) {
     try { graph = kgMapDocument_(docId); } catch (e) { graph = { error: String(e.message || e) }; }
   }
   return { docId: docId, chunks: chunks.length, graph: graph };
