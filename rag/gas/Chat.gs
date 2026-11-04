@@ -42,6 +42,7 @@ function runChat_(req, opts) {
   // kind 讓觀測面板知道怎麼呈現：triage、retrieval、checks、skills、prompt、json、text
   const T = (step, detail, kind) => trace.push({ step: step, kind: kind || (typeof detail === 'string' ? 'text' : 'json'), detail: detail, ms: Date.now() - t0 });
   const metrics = { retrieved: null, top: null, cited: null, skills: [] };
+  const stab = stabReset_();
   const C = cfgAll_();
   const maxFu = Number(C.max_followups == null ? 1 : C.max_followups);
 
@@ -64,8 +65,10 @@ function runChat_(req, opts) {
   if (useTriage) {
     const triReq = genReq_(C.model_triage, [{ text: triagePrompt_(prevTeacher, d.text, topics, Object.keys(refTable)) }], { json: true, temperature: 0, noThink: true });
     const [triRes, embRes] = UrlFetchApp.fetchAll([triReq, embedReqs_([expAll.text, expNew.text], 'RETRIEVAL_QUERY')[0]]);
+    stabAt_('L4');
     tri = parseJson_(genText_(genFix_(triReq, triRes)));
     vecs = embedParse_(embRes);
+    validateTriage_(tri);
   } else {
     vecs = embedParse_(UrlFetchApp.fetch.apply(null, reqArgs_(embedReqs_([expAll.text, expNew.text], 'RETRIEVAL_QUERY')[0])));
     const words = fullCase + '\n' + expAll.concepts.join('\n');
@@ -89,6 +92,7 @@ function runChat_(req, opts) {
   const base = { nameMap: d.map, deidText: d.text, triage: tri, metrics: metrics, intent: intent, newCase: isNew, answered: answered };
   const finish = (out) => {
     const res = Object.assign(base, out, { ms: Date.now() - t0 });
+    res.stability = { models: { triage: useTriage ? C.model_triage : '', answer: C.model_answer, check: C.model_check, rerank: C.model_rerank || '' }, ev: stab.ev, rewriteWhy: stab.rewriteWhy || [] };
     try { logTurn_(req, res, trace); } catch (e) { console.warn(e); }
     if (opts.trace) res.trace = trace;
     return res;
@@ -160,11 +164,24 @@ function runChat_(req, opts) {
       ? assemble_(sysPrompt, skillText, tri, caseText, hits, ctxHistory, ref, refWho, attempt ? chk.reasons : null, focus, fallback)
       : assembleContinue_(sysPrompt, skillText, tri, prevTeacher, d.text, hits, ctxHistory, ref, refWho, intent, attempt ? chk.reasons : null, focus);
     if (attempt === 0) T('P07 Prompt 組裝', { summary: (mode === 'full' ? '完整回答' : '延續回覆') + '｜固定 system prompt ' + sysPrompt.length + ' 字｜Skill ' + skillText.length + ' 字｜知識 ' + hits.length + ' 段｜歷史 ' + ctxHistory.length + ' 則｜共 ' + prompt.length + ' 字', prompt: prompt }, 'prompt');
-    ans = cleanAnswer_(genJson_(C.model_answer, prompt, { temperature: Number(C.temperature || 0.3) }));
+    stabAt_('A1');
+    let raw;
+    try { raw = genJson_(C.model_answer, prompt, { temperature: Number(C.temperature || 0.3) }); }
+    catch (e) {
+      // 回覆讀不出 JSON：當成這一版沒通過，重寫一次（原本會直接出錯）
+      if (!/JSON/.test(e.message)) throw e;
+      chk = { pass: false, items: [{ name: '格式', pass: false, note: '回覆不是有效的 JSON' }], reasons: ['上一版回覆不是有效的 JSON，請只輸出 JSON'] };
+      T(attempt ? 'A1 重寫' : 'A1 生成', '回覆不是有效的 JSON'); (stab.rewriteWhy = stab.rewriteWhy || []).push('格式');
+      rewritten = true; continue;
+    }
+    validateAnswer_(raw, mode);
+    ans = cleanAnswer_(raw);
     T(attempt ? 'A1 重寫' : 'A1 生成', '策略 ' + (ans.strategies || []).length + ' 個');
+    stabAt_('L5');
     chk = checks_(caseText, ans, hits, C, range, focus, fallback);
     T('檢查', chk.items, 'checks');
     if (chk.pass) break;
+    (stab.rewriteWhy = stab.rewriteWhy || []).push.apply(stab.rewriteWhy, chk.items.filter(x => !x.pass).map(x => x.name));
     rewritten = true;
   }
   if (!chk.pass) {
@@ -185,6 +202,27 @@ function runChat_(req, opts) {
   return finish({ type: fallback ? 'ai_fallback' : 'answer', answer: ans, sources: sources, referral: referral, checks: chk.items, rewritten: rewritten, answered: answered + 1 });
 }
 
+// ---------- 穩定度：檢查模型回的 JSON 有沒有照格式（只記錄，不改變流程） ----------
+function validateTriage_(t) {
+  if (!t || typeof t !== 'object') return stabNote_('型別錯誤', '分流結果不是物件');
+  ['intent', 'focus', 'referral', 'topics', 'in_scope', 'info_enough'].forEach(k => { if (!(k in t)) stabNote_('缺欄位', k); });
+  if ('intent' in t && INTENTS.indexOf(t.intent) < 0) stabNote_('選項不符', 'intent＝' + t.intent);
+  if ('topics' in t && !Array.isArray(t.topics)) stabNote_('型別錯誤', 'topics 不是陣列');
+}
+function validateAnswer_(a, mode) {
+  if (!a || typeof a !== 'object' || Array.isArray(a)) return stabNote_('型別錯誤', '回答不是物件');
+  const req = mode === 'full' ? ['empathy', 'understanding', 'strategies', 'parent_message', 'observe', 'teacher_care', 'referral'] : ['reply', 'strategies', 'parent_message', 'observe', 'referral'];
+  req.forEach(k => { if (!(k in a)) stabNote_('缺欄位', k); });
+  ['empathy', 'understanding', 'reply', 'parent_message', 'teacher_care'].forEach(k => { if (a[k] != null && typeof a[k] !== 'string') stabNote_('型別錯誤', k + ' 不是文字'); });
+  if ('strategies' in a && !Array.isArray(a.strategies)) stabNote_('型別錯誤', 'strategies 不是陣列');
+  if ('observe' in a && a.observe != null && !Array.isArray(a.observe)) stabNote_('型別錯誤', 'observe 不是陣列');
+  [].concat(Array.isArray(a.strategies) ? a.strategies : []).forEach((s, i) => {
+    if (!s || typeof s !== 'object') return stabNote_('型別錯誤', '策略' + (i + 1) + ' 不是物件');
+    ['title', 'how', 'refs'].forEach(k => { if (!(k in s)) stabNote_('缺欄位', '策略' + (i + 1) + '.' + k); });
+    if ('refs' in s && !Array.isArray(s.refs)) stabNote_('型別錯誤', '策略' + (i + 1) + '.refs 不是陣列');
+  });
+}
+
 // ---------- 回答清理：欄位一律轉成文字，去掉模型自己寫進內文的 (K1) ----------
 function str_(v) {
   if (v == null) return '';
@@ -201,8 +239,9 @@ function cleanAnswer_(a) {
   ['empathy', 'understanding', 'parent_message', 'teacher_care', 'referral', 'reply'].forEach(k => {
     if (a[k] == null || a[k] === 'null') a[k] = null; else a[k] = stripRefs_(a[k]) || null;
   });
-  a.strategies = (a.strategies || []).map(s => ({ title: stripRefs_(s.title), how: stripRefs_(s.how), refs: (s.refs || []).map(String) }));
-  a.observe = (a.observe || []).map(stripRefs_).filter(Boolean);
+  // 型別容錯：refs 給成字串、strategies／observe 不是陣列時也不會出錯
+  a.strategies = [].concat(a.strategies || []).filter(s => s && typeof s === 'object').map(s => ({ title: stripRefs_(s.title), how: stripRefs_(s.how), refs: [].concat(s.refs || []).map(String).filter(Boolean) }));
+  a.observe = [].concat(a.observe || []).map(stripRefs_).filter(Boolean);
   if (a.options) a.options = [].concat(a.options).map(str_).filter(Boolean);
   return a;
 }
@@ -279,6 +318,9 @@ function checks_(caseText, ans, hits, C, range, focus, fallback) {
         '格式：{' + (doL5 ? '"issues":[{"type":"依據|轉介|語氣","severe":false,"note":"一句話說明問題"}]' : '') + (doL5 && doRel ? ',' : '') +
         (doRel ? '"relevance":{"addressed":true,"note":""}' : '') + '}' + (doL5 ? '，沒有問題時 issues 為空陣列' : '') + '\n\n' +
         (doRel ? '老師想要的：' + focus + '\n\n' : '') + '老師描述：\n' + caseText + '\n\n知識：\n' + kn + '\n\n回答：\n' + s, { temperature: 0, noThink: true });
+      if (doL5 && !Array.isArray(l5.issues)) stabNote_(l5.issues == null ? '缺欄位' : '型別錯誤', 'issues');
+      if (doL5 && Array.isArray(l5.issues) && l5.issues.some(x => typeof x === 'string')) stabNote_('型別錯誤', 'issues 項目是文字不是物件');
+      if (doRel && (!l5.relevance || typeof l5.relevance.addressed !== 'boolean')) stabNote_(l5.relevance ? '型別錯誤' : '缺欄位', 'relevance.addressed');
       if (doL5) {
         // 模型可能回字串或物件，一律轉成「類型：說明」文字
         const issues = (l5.issues || []).map(x => typeof x === 'string' ? { type: '', severe: true, note: x }
@@ -317,5 +359,6 @@ function logTurn_(req, res, trace) {
     res.type, JSON.stringify(res.answer || res.questions || res.message || ''), (res.sources || []).map(s => s.ref + ':' + s.title).join('｜'),
     JSON.stringify(res.checks || []), res.rewritten ? '是' : '否', res.ms || '',
     m.retrieved == null ? '' : m.retrieved, m.top == null ? '' : m.top, m.cited == null ? '' : m.cited, (m.skills || []).join('、'),
-    tr.length > 48000 ? JSON.stringify(trace.map(t => ({ step: t.step, kind: 'text', detail: '（內容過長未保存）', ms: t.ms }))) : tr]]);
+    tr.length > 48000 ? JSON.stringify(trace.map(t => ({ step: t.step, kind: 'text', detail: '（內容過長未保存）', ms: t.ms }))) : tr,
+    JSON.stringify(res.stability || {})]]);
 }

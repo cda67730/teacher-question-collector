@@ -151,12 +151,15 @@ function rerankSelect_(focus, caseText, pool, C) {
   let scores = pool.map(() => null), used = false;
   if (pool.length && truthy_(C.enable_rerank == null || C.enable_rerank === '' ? true : C.enable_rerank)) {
     try {
+      stabAt_('重排');
       const r = genJson_(C.model_rerank || C.model_check || C.model_triage, '你在替幼教老師的提問挑選參考資料，只輸出 JSON。\n' +
         '老師這次想要的（提問焦點）：' + focus + '\n老師的描述：' + String(caseText).slice(0, 1500) + '\n\n' +
         '為每段資料打分：3＝能直接回答焦點（有具體可用的做法）、2＝部分回答、1＝只是相關背景或一般原則、0＝無關。\n' +
         '格式：{"scores":[3,1,…]}，順序與段落相同。\n\n' + pool.map((h, i) => '【' + (i + 1) + '】' + (h.type ? '（' + h.type + '）' : '') + h.text.slice(0, 600)).join('\n\n'),
         { temperature: 0, noThink: true });
       const arr = Array.isArray(r) ? r : (r.scores || []);
+      if (!Array.isArray(r) && !Array.isArray(r.scores)) stabNote_('缺欄位', 'scores');
+      else if (arr.length !== pool.length) stabNote_('數量不符', '分數 ' + arr.length + ' 個／段落 ' + pool.length + ' 段');
       scores = pool.map((_, i) => { const v = Number(arr[i]); return arr[i] == null || isNaN(v) ? null : Math.max(0, Math.min(3, v)); });
       used = scores.some(v => v != null);          // 讀不出分數就退回向量順序
       if (!used) scores = pool.map(() => null);

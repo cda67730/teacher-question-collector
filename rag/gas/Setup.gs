@@ -158,7 +158,7 @@ function setup() {
   make(SHEETS.codes, ['邀請碼', '園所代號', '啟用', '觀測'], [['TEST-2026', '測試園', true, true]]);
   const me = Session.getActiveUser().getEmail();
   make(SHEETS.admins, ['Email', '備註', '帳號', '密碼雜湊', '鹽'], me ? [[me, '建立者', '', '', '']] : []);
-  make(SHEETS.logs, ['時間', 'Session', '園所', '輪次', '老師訊息（去識別化）', '分流', '轉介', '回應類型', '回答', '引用', '檢查', '是否重寫', '耗時ms', '檢索段數', '最高相似度', '被引用段數', '載入Skill', '流程紀錄']);
+  make(SHEETS.logs, ['時間', 'Session', '園所', '輪次', '老師訊息（去識別化）', '分流', '轉介', '回應類型', '回答', '引用', '檢查', '是否重寫', '耗時ms', '檢索段數', '最高相似度', '被引用段數', '載入Skill', '流程紀錄', '穩定度']);
   make(SHEETS.feedback, ['時間', 'Session', '輪次', '類型', '備註']);
   make(SHEETS.kgNodes, ['節點ID', '名稱', '類型', '上層', '路徑', '定義', '實務要點', '來源ID', '同義說法', '狀態', '來源', '新增時間']);
   make(SHEETS.kgEdges, ['主詞', '關係', '受詞', '關係說明', '來源']);

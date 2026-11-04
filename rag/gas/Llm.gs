@@ -66,10 +66,18 @@ function genText_(res) {
   return parts.filter(p => !p.thought).map(p => p.text || '').join('').trim(); // 略過思考摘要
 }
 
+// ---------- 穩定度紀錄：每回合重設，寫進對話紀錄的「穩定度」欄 ----------
+// STAB_.at：目前在哪一步（L4／A1／L5／重排）；STAB_.ev：[{at, kind, note}]
+let STAB_ = null;
+function stabReset_() { STAB_ = { at: '', ev: [] }; return STAB_; }
+function stabAt_(at) { if (STAB_) STAB_.at = at; }
+function stabNote_(kind, note) { if (STAB_ && STAB_.ev.length < 30) STAB_.ev.push({ at: STAB_.at, kind: kind, note: String(note || '').slice(0, 120) }); }
+
 function parseJson_(text) {
   try { return JSON.parse(text); } catch (e) {}
   const m = String(text).match(/[\[{][\s\S]*[\]}]/);
-  if (m) { try { return JSON.parse(m[0]); } catch (e) {} }
+  if (m) { try { const v = JSON.parse(m[0]); stabNote_('JSON補救', '回覆夾雜非 JSON 文字，已擷取'); return v; } catch (e) {} }
+  stabNote_('JSON失敗', String(text).slice(0, 80));
   throw new Error('模型回覆不是有效的 JSON');
 }
 
@@ -86,6 +94,7 @@ function genFix_(req, res) {
   ['reasoning_effort', 'temperature', 'top_p'].forEach(k => delete body[k]);
   const a = reqArgs_(Object.assign({}, req, { payload: JSON.stringify(body) }));
   console.warn('模型不接受部分參數，已拿掉後重送：' + req.url);
+  stabNote_('參數不相容', '已拿掉思考／溫度設定重送');
   return UrlFetchApp.fetch(a[0], a[1]);
 }
 function genJson_(model, prompt, opts) {

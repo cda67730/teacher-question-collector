@@ -167,6 +167,7 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
     <div>
       <div class="box"><h4>知識缺口 <span class="note">檢索沒命中或只能保守回答的問題，請專家補資料</span></h4><ol id="lGaps" style="padding-left:18px;margin:0"></ol></div>
       <div class="box"><h4>常被引用的文件</h4><ol id="lDocs" style="padding-left:18px;margin:0"></ol></div>
+      <div class="box"><h4>格式穩定度 <span class="note">模型回的 JSON 有沒有照格式；只記錄，不影響回答</span></h4><div id="lStab" style="font-size:13px"></div></div>
       <div class="box note" style="font-size:12px;line-height:1.6"><b>指標怎麼算</b><br>
         檢索命中率＝走到檢索的回合中，至少有 1 段超過門檻的比例<br>
         引用率＝回答實際引用的段數 ÷ 檢索採用的段數（越高代表找到的資料越對題）<br>
@@ -513,6 +514,16 @@ async function loadLogs() {
     $('lRows').querySelectorAll('tr.click').forEach(tr => tr.onclick = () => openDetail(+tr.dataset.row));
     $('lGaps').innerHTML = L.gaps.map(g => `<li><a data-row="${g.row}">${esc(g.msg)}</a> <span class="note">${esc(g.time.slice(5))}${g.top != null ? '｜最高 ' + g.top : ''}</span></li>`).join('') || '<li class="note">目前沒有</li>';
     $('lGaps').querySelectorAll('a').forEach(a => a.onclick = () => openDetail(+a.dataset.row));
+    const S = L.stability || {}; const pc = (a, b) => b ? Math.round(a / b * 1000) / 10 + '%' : '—';
+    const list = (o, sfx) => Object.keys(o).sort((a, b) => o[b] - o[a]).map(x => `<li>${esc(x)} <span class="note">${o[x]}${sfx || ' 次'}</span></li>`).join('') || '<li class="note">沒有</li>';
+    $('lStab').innerHTML = !S.turns ? '<p class="note">還沒有紀錄（更新後的新對話才會記錄）</p>' :
+      `<p style="margin:0 0 6px">有格式問題的回合：<b>${pc(S.withIssue, S.turns)}</b> <span class="note">（${S.withIssue}／${S.turns}）</span></p>` +
+      `<b>依回答模型</b><ul style="margin:2px 0 6px;padding-left:18px">${Object.keys(S.byModel).map(m => { const x = S.byModel[m]; return `<li>${esc(m || '（未記錄）')}：${pc(x.withIssue, x.turns)} 有問題，回答本身 ${pc(x.a1, x.turns)} <span class="note">${x.turns} 回合</span></li>`; }).join('')}</ul>` +
+      `<b>問題類型</b><ul style="margin:2px 0 6px;padding-left:18px">${list(S.byKind)}</ul>` +
+      `<b>出在哪一步</b><ul style="margin:2px 0 6px;padding-left:18px">${list(S.byStep)}</ul>` +
+      `<b>重寫原因</b> <span class="note">第一版沒通過的項目</span><ul style="margin:2px 0 6px;padding-left:18px">${list(S.rewriteWhy)}</ul>` +
+      (S.recent.length ? `<b>最近的例子</b><ul style="margin:2px 0 0;padding-left:18px">${S.recent.slice(0, 8).map(r => `<li><a data-row="${r.row}">${esc(r.time.slice(5))}</a> <span class="note">${esc(r.ev.map(e => e.at + ' ' + e.kind + (e.note ? '：' + e.note : '')).join('｜'))}</span></li>`).join('')}</ul>` : '');
+    $('lStab').querySelectorAll('a[data-row]').forEach(a => a.onclick = () => openDetail(+a.dataset.row));
     $('lDocs').innerHTML = L.topDocs.map(d => `<li>${esc(d.title)} <span class="note">${d.n} 次</span></li>`).join('') || '<li class="note">目前沒有</li>';
   } catch (e) { $('lRows').innerHTML = `<tr><td colspan="10" style="color:#b23a3a">${esc(e.message)}</td></tr>`; }
   finally { $('lLoad').disabled = false; }

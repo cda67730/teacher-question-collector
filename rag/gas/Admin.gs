@@ -287,7 +287,31 @@ function adminLogs(opts) {
   all.forEach(r => String(r['引用'] || '').split('｜').filter(Boolean).forEach(x => { const t = x.replace(/^K\d+:/, ''); docCount[t] = (docCount[t] || 0) + 1; }));
   const topDocs = Object.keys(docCount).map(k => ({ title: k, n: docCount[k] })).sort((a, b) => b.n - a.n).slice(0, 10);
   const schools = Array.from(new Set(rows_('logs').map(r => String(r['園所'])).filter(Boolean)));
-  return { stats: stats, rows: rows.slice(-300).reverse(), gaps: gaps, topDocs: topDocs, schools: schools, typeNames: LOG_TYPE_NAME };
+  return { stats: stats, stability: stabilityStats_(all), rows: rows.slice(-300).reverse(), gaps: gaps, topDocs: topDocs, schools: schools, typeNames: LOG_TYPE_NAME };
+}
+
+/** 穩定度統計：哪一步、哪個模型、出現什麼格式問題；重寫是因為什麼 */
+function stabilityStats_(rows) {
+  const out = { turns: 0, withIssue: 0, byKind: {}, byStep: {}, byModel: {}, rewriteWhy: {}, recent: [] };
+  rows.forEach(r => {
+    let st = null; try { st = r['穩定度'] ? JSON.parse(r['穩定度']) : null; } catch (e) {}
+    if (!st || !st.models) return;
+    out.turns++;
+    const ev = st.ev || [];
+    const model = st.models.answer || '';
+    const m = out.byModel[model] || (out.byModel[model] = { turns: 0, withIssue: 0, a1: 0 });
+    m.turns++;
+    if (ev.length) { out.withIssue++; m.withIssue++; }
+    if (ev.some(e => e.at === 'A1')) m.a1++;
+    ev.forEach(e => {
+      out.byKind[e.kind] = (out.byKind[e.kind] || 0) + 1;
+      const k = (e.at || '其他') + '｜' + e.kind; out.byStep[k] = (out.byStep[k] || 0) + 1;
+    });
+    (st.rewriteWhy || []).forEach(w => out.rewriteWhy[w] = (out.rewriteWhy[w] || 0) + 1);
+    if (ev.length && out.recent.length < 200) out.recent.push({ row: r._row, time: fmt_(r['時間']), ev: ev.slice(0, 5) });
+  });
+  out.recent = out.recent.slice(-20).reverse();
+  return out;
 }
 
 /** 單一回合明細：同一個 Session 的完整對話 + 這一回合的流程紀錄 */
