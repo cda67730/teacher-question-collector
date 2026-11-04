@@ -57,12 +57,24 @@ function runChat_(req, opts) {
   const topics = Array.from(new Set([].concat.apply([], skills.filter(s => !s.always).map(s => s.tags))));
   const refTable = referral_();
   const expAll = expandQuery_(fullCase), expNew = expandQuery_(d.text);
-  const triReq = genReq_(C.model_triage, [{ text: triagePrompt_(prevTeacher, d.text, topics, Object.keys(refTable)) }], { json: true, temperature: 0, noThink: true });
-  const [triRes, embRes] = UrlFetchApp.fetchAll([triReq, embedReqs_([expAll.text, expNew.text], 'RETRIEVAL_QUERY')[0]]);
-  const tri = parseJson_(genText_(genFix_(triReq, triRes)));
-  const vecs = embedParse_(embRes);
+  // enable_triage 關閉：不呼叫分流 AI，主題改用關鍵字比對（Skill 對應主題、同義詞概念），直接檢索知識庫回答
+  //  代價：不偵測轉介、不判斷超出範圍、不追問、不判斷是否換了新個案（同一段對話都當同一個案）
+  const useTriage = truthy_(C.enable_triage == null || C.enable_triage === '' ? true : C.enable_triage);
+  let tri, vecs;
+  if (useTriage) {
+    const triReq = genReq_(C.model_triage, [{ text: triagePrompt_(prevTeacher, d.text, topics, Object.keys(refTable)) }], { json: true, temperature: 0, noThink: true });
+    const [triRes, embRes] = UrlFetchApp.fetchAll([triReq, embedReqs_([expAll.text, expNew.text], 'RETRIEVAL_QUERY')[0]]);
+    tri = parseJson_(genText_(genFix_(triReq, triRes)));
+    vecs = embedParse_(embRes);
+  } else {
+    vecs = embedParse_(UrlFetchApp.fetch.apply(null, reqArgs_(embedReqs_([expAll.text, expNew.text], 'RETRIEVAL_QUERY')[0])));
+    const words = fullCase + '\n' + expAll.concepts.join('\n');
+    tri = { intent: prevTeacher.length ? '補充同一個案' : '新個案', focus: '', referral: { category: 'none', level: 'none' },
+      topics: topics.filter(t => t && words.indexOf(t) >= 0), in_scope: true, info_enough: true, missing: [], skipped: true };
+  }
   const ref = tri.referral && tri.referral.category && tri.referral.category !== 'none' && tri.referral.level && tri.referral.level !== 'none' ? tri.referral : null;
-  T('L4 分流', tri, 'triage');
+  if (useTriage) T('L4 分流', tri, 'triage');
+  else T('L4 分流（已關閉）', '未呼叫分流 AI；主題依關鍵字比對：' + (tri.topics.join('、') || '無') + '｜不偵測轉介、不追問、同一段對話視為同一個案');
 
   // 意圖：新個案就只看這一則，舊的對話不帶進來；其他意圖延續整段個案
   const intent = INTENTS.indexOf(tri.intent) >= 0 ? tri.intent : (prevTeacher.length ? '補充同一個案' : '新個案');
