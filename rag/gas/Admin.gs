@@ -99,7 +99,7 @@ function adminCall(token, fn, args) {
     adminUploadDoc: adminUploadDoc, adminDocChunks: adminDocChunks, adminSetChunkType: adminSetChunkType, adminClassifyDoc: adminClassifyDoc,
     adminSetDocStatus: adminSetDocStatus, adminTestChat: adminTestChat, adminLogs: adminLogs, adminLogDetail: adminLogDetail,
     adminEvalList: adminEvalList, adminAddEval: adminAddEval, adminDeleteEval: adminDeleteEval, adminRunEval: adminRunEval,
-    adminModels: adminModels, adminPingModel: adminPingModel, adminImportKG: adminImportKG, adminKgGenStart: adminKgGenStart, adminKgGenBatch: adminKgGenBatch, adminKgGenFinish: adminKgGenFinish, adminGraphLoad: adminGraphLoad, adminMapDoc: adminMapDoc, adminCandAction: adminCandAction,
+    adminRepairVectors: adminRepairVectors, adminModels: adminModels, adminPingModel: adminPingModel, adminImportKG: adminImportKG, adminKgGenStart: adminKgGenStart, adminKgGenBatch: adminKgGenBatch, adminKgGenFinish: adminKgGenFinish, adminGraphLoad: adminGraphLoad, adminMapDoc: adminMapDoc, adminCandAction: adminCandAction,
   };
   if (!API[fn]) throw new Error('未知的操作');
   ADMIN_CTX_ = account;
@@ -135,7 +135,7 @@ function adminSaveSettings(list) {
   const s = sh_('settings'); const v = s.getDataRange().getValues();
   list.forEach(item => {
     const i = v.findIndex((r, idx) => idx > 0 && r[0] === item.key);
-    if (i > 0) s.getRange(i + 1, 2).setValue(item.value);
+    if (i > 0) s.getRange(i + 1, 2).setValue(safeCell_(item.value));
   });
   clearCfgCache_();
   return true;
@@ -151,7 +151,7 @@ function adminSaveSkill(sk) {
   let version = 1, id = sk.id;
   if (row) {
     version = Number(row['版本'] || 1) + 1;
-    s.getRange(row._row, 1, 1, 9).setValues([[id, sk.name, sk.tags || '', !!sk.always, sk.content || '', !!sk.enabled, version, me, now]]);
+    s.getRange(row._row, 1, 1, 9).setValues(safeRows_([[id, sk.name, sk.tags || '', !!sk.always, sk.content || '', !!sk.enabled, version, me, now]]));
   } else {
     id = 'S' + String(all.length + 1).padStart(2, '0') + '-' + Utilities.getUuid().slice(0, 4);
     append_('skills', [[id, sk.name, sk.tags || '', !!sk.always, sk.content || '', sk.enabled !== false, 1, me, now]]);
@@ -376,7 +376,7 @@ function adminRunEval() {
     const top = sd.cands.length ? sd.cands[0].score : 0; topSum += top;
     const result = hit ? '命中' : candRank ? '未達門檻' : '沒找到';
     const hitTxt = hit ? hit.title + (hit.page ? ' p.' + hit.page : '') + '（' + hit.score + '）' : candRank ? '第 ' + candRank + ' 名但分數 ' + sd.cands[candRank - 1].score + ' 低於門檻 ' + sd.minScore : '';
-    s.getRange(r._row, 4, 1, 5).setValues([[result, hitRank || (candRank ? '>' + sd.topK : ''), top, hitTxt, now]]);
+    s.getRange(r._row, 4, 1, 5).setValues(safeRows_([[result, hitRank || (candRank ? '>' + sd.topK : ''), top, hitTxt, now]]));
     return { row: r._row, q: String(r['測試問題']), expect: expect.join(', '), result: result, rank: hitRank, candRank: candRank, top: top, hit: hitTxt,
       cands: sd.cands.slice(0, 5).map(c => ({ docId: c.docId, title: c.title, page: c.page, score: c.score, pass: c.pass, ok: expect.indexOf(c.docId) >= 0 })) };
   });
@@ -434,3 +434,5 @@ function adminPingModel(model, kind) {
   const r = genJson_(model, '只輸出 JSON：{"ok":true,"say":"用一句繁體中文打招呼"}', { temperature: 0, noThink: true });
   return { ok: true, ms: Date.now() - t, reply: String(r.say || JSON.stringify(r)).slice(0, 60) };
 }
+
+function adminRepairVectors() { requireAdmin_(); return repairVectors_(); }

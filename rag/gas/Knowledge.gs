@@ -109,10 +109,34 @@ function loadIndex_() {
   rows_('docs').forEach(r => docs[String(r['文件ID'])] = { title: String(r['標題']), source: String(r['出處']), evidence: String(r['證據等級']) });
   const v = sh_('chunks').getDataRange().getValues(); const h = v.shift();
   const I = n => h.indexOf(n);
-  return v.filter(r => r[I('狀態')] === '已核可' && r[I('向量')]).map(r => ({
-    id: String(r[I('段落ID')]), docId: String(r[I('文件ID')]), text: String(r[I('內容')]), page: String(r[I('頁碼')] || ''),
-    vec: dequant_(String(r[I('向量')])), doc: docs[String(r[I('文件ID')])] || {}, type: I('類型') >= 0 ? String(r[I('類型')] || '') : '',
-  }));
+  const dim = Number(cfg_('embed_dim') || 768);
+  return v.filter(r => r[I('狀態')] === '已核可' && r[I('向量')]).map(r => {
+    const vec = vecOf_(r[I('向量')], dim); if (!vec) return null;   // 向量損壞的段落先略過（到後台「檢查並修復向量」重算）
+    return { id: String(r[I('段落ID')]), docId: String(r[I('文件ID')]), text: String(r[I('內容')]), page: String(r[I('頁碼')] || ''),
+      vec: vec, doc: docs[String(r[I('文件ID')])] || {}, type: I('類型') >= 0 ? String(r[I('類型')] || '') : '' };
+  }).filter(Boolean);
+}
+/** 讀出儲存格裡的向量；格式錯誤（例如被當成公式變成 #ERROR!）或維度不符回傳 null */
+function vecOf_(cell, dim) {
+  const s = String(cell || '').replace(/^'/, '');
+  if (!s || s.charAt(0) === '#') return null;
+  try { const v = dequant_(s); return v && v.length === dim ? v : null; } catch (e) { return null; }
+}
+/** 找出向量損壞的段落並重新產生向量（舊版寫入時，以「+」開頭的 base64 會被試算表當成公式而損壞） */
+function repairVectors_() {
+  const dim = Number(cfg_('embed_dim') || 768);
+  const docs = {}; rows_('docs').forEach(r => docs[String(r['文件ID'])] = String(r['標題'] || ''));
+  const s = sh_('chunks'); const head = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0]; const vi = head.indexOf('向量') + 1;
+  const bad = rows_('chunks').filter(r => !vecOf_(r['向量'], dim));
+  if (!bad.length) return { total: rows_('chunks').length, bad: 0, fixed: 0 };
+  let fixed = 0;
+  for (let i = 0; i < bad.length; i += 50) {
+    const group = bad.slice(i, i + 50);
+    const vecs = embedTexts_(group.map(r => (docs[String(r['文件ID'])] ? docs[String(r['文件ID'])] + '\n' : '') + String(r['內容'])), 'RETRIEVAL_DOCUMENT');
+    group.forEach((r, j) => { if (vecs[j]) { s.getRange(r._row, vi).setValue(safeCell_(quant_(vecs[j]))); fixed++; } });
+  }
+  try { CacheService.getScriptCache().remove('index'); } catch (e) {}
+  return { total: rows_('chunks').length, bad: bad.length, fixed: fixed, ids: bad.slice(0, 20).map(r => String(r['段落ID'])) };
 }
 
 /** 檢索明細：回傳門檻、前 10 名候選（含未達門檻者）與最後採用的段落；觀測面板與命中率測試共用 */

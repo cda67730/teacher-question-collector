@@ -155,7 +155,8 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
   <label>或直接貼上文字</label>
   <textarea id="dText" rows="4" placeholder="貼上文字時不需選檔案"></textarea>
   <p class="row"><button class="btn pri" id="upload">上傳並切段</button><span class="note" id="upStatus"></span></p>
-  <h3 style="margin-top:18px">文件清單</h3>
+  <div class="row" style="justify-content:space-between;margin-top:18px"><h3 style="margin:0">文件清單</h3>
+    <div class="row"><span class="note" id="vecStatus"></span><button class="btn" id="vecRepair" title="找出向量損壞（無法被檢索）的段落並重新產生向量">檢查並修復向量</button></div></div>
   <div class="list"><table><thead><tr><th>標題</th><th>出處</th><th>等級</th><th>段落</th><th>狀態</th><th>上傳</th><th>操作</th></tr></thead><tbody id="docRows"></tbody></table></div>
   <div id="chunkView"></div>
 </section>
@@ -538,6 +539,12 @@ $('upload').onclick = async () => {
     $('dFile').value = ''; $('dText').value = ''; $('dTitle').value = ''; $('dSource').value = '';
     D = await run('adminLoad'); renderDocs();
   } catch (e) { $('upStatus').textContent = '上傳失敗：' + e.message; } finally { $('upload').disabled = false; }
+};
+
+$('vecRepair').onclick = async () => {
+  $('vecRepair').disabled = true; $('vecStatus').textContent = '檢查中…';
+  try { const r = await run('adminRepairVectors'); $('vecStatus').textContent = r.bad ? `共 ${r.total} 段，${r.bad} 段向量損壞，已修復 ${r.fixed} 段` : `共 ${r.total} 段，向量都正常`; }
+  catch (e) { $('vecStatus').textContent = '失敗：' + e.message; } finally { $('vecRepair').disabled = false; }
 };
 
 // ---------- 測試對話 ----------

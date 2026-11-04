@@ -24,7 +24,12 @@ function rows_(key) {
   // 先記下真正的列號再過濾空白列，之後依 _row 更新才不會改錯列
   return v.map((r, i) => { const o = { _row: i + 2 }; head.forEach((h, j) => o[h] = r[j]); o._empty = !r.some(c => c !== ''); return o; }).filter(o => !o._empty);
 }
-function append_(key, arr) { const s = sh_(key); s.getRange(s.getLastRow() + 1, 1, arr.length, arr[0].length).setValues(arr); }
+function append_(key, arr) { const s = sh_(key); s.getRange(s.getLastRow() + 1, 1, arr.length, arr[0].length).setValues(safeRows_(arr)); }
+// ---------- 寫入安全：避免文字被試算表當成公式（公式注入），也避免 base64 向量以「+」開頭變成錯誤值 ----------
+// 開頭是 = + - @（含前置空白、Tab、換行）的文字前面加 '，試算表會當成純文字；讀回來時不會多出 '
+function safeCell_(v) { return typeof v === 'string' && /^[\s]*[=+\-@]/.test(v) ? "'" + v : v; }
+function safeRows_(arr) { return arr.map(r => r.map(safeCell_)); }
+
 function truthy_(v) { return v === true || String(v).toUpperCase() === 'TRUE' || v === '是'; }
 
 // ---------- 設定（快取 60 秒） ----------
@@ -61,6 +66,26 @@ function referral_() {
 
 // ---------- 邀請碼與頻率 ----------
 /** 回傳 { school, trace }；trace 為 true 的邀請碼可以在聊天頁看到流程觀測面板 */
+// ---------- 邀請碼錯誤次數限制（Apps Script 拿不到來源 IP，所以用全域計數） ----------
+// 10 分鐘內輸錯超過 CODE_FAIL_MAX 次 → 鎖 15 分鐘：期間只接受最近 24 小時內成功用過的邀請碼，新輸入的一律拒絕
+const CODE_FAIL_MAX = 20, CODE_FAIL_WINDOW = 600, CODE_LOCK_SECONDS = 900;
+function codeLocked_() { return !!CacheService.getScriptCache().get('code_lock'); }
+function codeFail_() {
+  const c = CacheService.getScriptCache(); const k = 'code_fail_' + Math.floor(Date.now() / 1000 / CODE_FAIL_WINDOW);
+  const n = Number(c.get(k) || 0) + 1; c.put(k, String(n), CODE_FAIL_WINDOW);
+  if (n >= CODE_FAIL_MAX) c.put('code_lock', '1', CODE_LOCK_SECONDS);
+  Utilities.sleep(800);   // 拖慢猜測速度
+}
+function codeSeen_(code) { return !!CacheService.getScriptCache().get('code_ok_' + String(code).trim().toUpperCase()); }
+function codeOk_(code) { try { CacheService.getScriptCache().put('code_ok_' + String(code).trim().toUpperCase(), '1', 86400); } catch (e) {} }
+/** 驗證邀請碼並處理錯誤次數；回傳 {info} 或 {error} */
+function verifyCode_(code) {
+  if (codeLocked_() && !codeSeen_(code)) return { error: '嘗試次數過多，請 15 分鐘後再試' };
+  const info = codeInfo_(code);
+  if (!info) { codeFail_(); return { error: '邀請碼不正確或已停用' }; }
+  codeOk_(code);
+  return { info: info };
+}
 function codeInfo_(code) {
   if (!code) return null;
   const c = String(code).trim().toUpperCase();

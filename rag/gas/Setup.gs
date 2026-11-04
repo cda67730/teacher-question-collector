@@ -120,7 +120,7 @@ function addMissingSettings_() {
   const s = sh_('settings');
   const have = s.getRange(1, 1, s.getLastRow(), 1).getValues().map(r => r[0]);
   const add = SETTINGS_DEFAULT.filter(r => have.indexOf(r[0]) < 0);
-  if (add.length) s.getRange(s.getLastRow() + 1, 1, add.length, 3).setValues(add);
+  if (add.length) s.getRange(s.getLastRow() + 1, 1, add.length, 3).setValues(safeRows_(add));
 }
 
 function setup() {
@@ -132,7 +132,7 @@ function setup() {
     if (!s) s = ss.insertSheet(name);
     if (s.getLastRow() === 0) {
       s.appendRow(head); s.setFrozenRows(1); s.getRange(1, 1, 1, head.length).setFontWeight('bold');
-      if (seed && seed.length) s.getRange(2, 1, seed.length, head.length).setValues(seed);
+      if (seed && seed.length) s.getRange(2, 1, seed.length, head.length).setValues(safeRows_(seed));
     } else {
       // 舊版工作表補上新欄位：對話紀錄是依位置寫入，直接換成新標題；其他表把缺的欄位加在最後
       const cur = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
@@ -155,7 +155,11 @@ function setup() {
   make(SHEETS.synonyms, ['老師用語', '對應概念'], [['丟', '攻擊行為'], ['推', '攻擊行為'], ['咬', '攻擊行為'], ['暴衝', '攻擊行為'], ['收拾', '轉銜時段'], ['換活動', '轉銜時段'], ['搶', '表達需求'], ['崩潰', '情緒調節'], ['回嘴', '口語對抗'], ['頂嘴', '口語對抗']]);
   make(SHEETS.forbidden, ['詞或規則', '類型', '說明'], [['過動', '詞', '不推測診斷'], ['ADHD', '詞', '不推測診斷'], ['自閉症', '詞', '不推測診斷'], ['亞斯', '詞', '不推測診斷'], ['問題兒童', '詞', '標籤化用語'], ['壞孩子', '詞', '標籤化用語'], ['故意找麻煩', '詞', '標籤化用語'], ['處罰', '詞', '不建議懲罰性做法'], ['懲罰', '詞', '不建議懲罰性做法'], ['吃藥', '詞', '不給醫療建議']]);
   make(SHEETS.referral, ['類別', '該找誰', '聯絡方式', '現在要做的事'], REFERRAL_DEFAULT);
-  make(SHEETS.codes, ['邀請碼', '園所代號', '啟用', '觀測'], [['TEST-2026', '測試園', true, true]]);
+  // 測試邀請碼每次隨機產生（不寫在程式裡，避免公開在 GitHub）
+  const testCode = 'TEST-' + Utilities.getUuid().replace(/-/g, '').slice(0, 10).toUpperCase();
+  const codesNew = !ss.getSheetByName(SHEETS.codes) || ss.getSheetByName(SHEETS.codes).getLastRow() === 0;
+  make(SHEETS.codes, ['邀請碼', '園所代號', '啟用', '觀測'], [[testCode, '測試園', true, true]]);
+  if (codesNew) console.log('已建立測試邀請碼：' + testCode + '（在「邀請碼」工作表，正式使用前請停用）');
   const me = Session.getActiveUser().getEmail();
   make(SHEETS.admins, ['Email', '備註', '帳號', '密碼雜湊', '鹽'], me ? [[me, '建立者', '', '', '']] : []);
   make(SHEETS.logs, ['時間', 'Session', '園所', '輪次', '老師訊息（去識別化）', '分流', '轉介', '回應類型', '回答', '引用', '檢查', '是否重寫', '耗時ms', '檢索段數', '最高相似度', '被引用段數', '載入Skill', '流程紀錄', '穩定度']);

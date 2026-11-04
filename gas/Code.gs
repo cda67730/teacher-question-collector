@@ -22,8 +22,9 @@ function doGet() {
 function doPost(e) {
   try {
     const req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
-    const school = checkCode_(req.code);
-    if (!school) return json_({ ok: false, error: '邀請碼不正確或已停用' });
+    const vc = verifyCode_(req.code);
+    if (vc.error) return json_({ ok: false, error: vc.error });
+    const school = vc.school;
     if (!rateOk_(req.code)) return json_({ ok: false, error: '使用次數過多，請稍後再試' });
     switch (req.action) {
       case 'check': return json_({ ok: true });
@@ -40,6 +41,23 @@ function doPost(e) {
 }
 
 // ---------- 邀請碼與頻率限制 ----------
+// 錯誤次數限制（Apps Script 拿不到來源 IP，所以用全域計數）：10 分鐘內輸錯超過 20 次 → 鎖 15 分鐘，
+// 期間只接受最近 24 小時內成功用過的邀請碼，新輸入的一律拒絕
+const CODE_FAIL_MAX = 20, CODE_FAIL_WINDOW = 600, CODE_LOCK_SECONDS = 900;
+function verifyCode_(code) {
+  const c = CacheService.getScriptCache(); const okKey = 'code_ok_' + String(code || '').trim();
+  if (c.get('code_lock') && !c.get(okKey)) return { error: '嘗試次數過多，請 15 分鐘後再試' };
+  const school = checkCode_(code);
+  if (!school) {
+    const k = 'code_fail_' + Math.floor(Date.now() / 1000 / CODE_FAIL_WINDOW);
+    const n = Number(c.get(k) || 0) + 1; c.put(k, String(n), CODE_FAIL_WINDOW);
+    if (n >= CODE_FAIL_MAX) c.put('code_lock', '1', CODE_LOCK_SECONDS);
+    Utilities.sleep(800);   // 拖慢猜測速度
+    return { error: '邀請碼不正確或已停用' };
+  }
+  try { c.put(okKey, '1', 86400); } catch (e) {}
+  return { school: school };
+}
 function checkCode_(code) {
   if (!code) return null;
   const rows = sheet_('邀請碼').getDataRange().getValues().slice(1);
@@ -124,7 +142,7 @@ function submit_(school, bg, answers) {
   ].concat(slotCols_(a)));
   if (rows.length) {
     const sh = sheet_('回答');
-    sh.getRange(sh.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
+    sh.getRange(sh.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(safeRows_(rows));
   }
   return id;
 }
@@ -139,6 +157,9 @@ function slotCols_(a) {
 }
 
 // ---------- 工具 ----------
+// 寫入安全：開頭是 = + - @ 的文字前面加 '，避免被試算表當成公式執行（公式注入）；讀回來時不會多出 '
+function safeCell_(v) { return typeof v === 'string' && /^[\s]*[=+\-@]/.test(v) ? "'" + v : v; }
+function safeRows_(arr) { return arr.map(r => r.map(safeCell_)); }
 function sheet_(name) {
   const id = PROPS.getProperty('SHEET_ID');
   const ss = id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActiveSpreadsheet();
@@ -159,6 +180,11 @@ function setup() {
   if (add.length) a.getRange(1, head.length + 1, 1, add.length).setValues([add]);
   a.setFrozenRows(1);
   const c = sheet_('邀請碼');
-  if (c.getLastRow() === 0) { c.appendRow(['邀請碼', '園所代號', '啟用']); c.appendRow(['TEST-2026', '測試園', true]); }
+  // 測試邀請碼每次隨機產生（不寫在程式裡，避免公開在 GitHub）
+  if (c.getLastRow() === 0) {
+    const testCode = 'TEST-' + Utilities.getUuid().replace(/-/g, '').slice(0, 10).toUpperCase();
+    c.appendRow(['邀請碼', '園所代號', '啟用']); c.appendRow([testCode, '測試園', true]);
+    console.log('已建立測試邀請碼：' + testCode + '（在「邀請碼」工作表，正式使用前請停用）');
+  }
   c.setFrozenRows(1);
 }

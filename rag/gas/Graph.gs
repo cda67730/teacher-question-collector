@@ -51,7 +51,7 @@ function kgRewrite_(key, keep, add) {
   const s = sh_(key), width = s.getLastColumn();
   if (s.getLastRow() > 1) s.getRange(2, 1, s.getLastRow() - 1, width).clearContent();
   const all = keep.concat(add);
-  if (all.length) s.getRange(2, 1, all.length, width).setValues(all.map(r => r.concat(Array(Math.max(0, width - r.length)).fill('')).slice(0, width)));
+  if (all.length) s.getRange(2, 1, all.length, width).setValues(safeRows_(all.map(r => r.concat(Array(Math.max(0, width - r.length)).fill('')).slice(0, width))));
 }
 function kgRowArr_(key, r) {
   const s = sh_(key); const head = s.getRange(1, 1, 1, s.getLastColumn()).getValues()[0];
@@ -200,7 +200,7 @@ function kgSaveMapping_(docId, res) {
     const ai = ch.indexOf('讀者對象'), gi = ch.indexOf('適用年齡'), xi = ch.indexOf('情境');
     if (ai >= 0 && gi >= 0 && xi >= 0) rows_('chunks').forEach(r => {
       const m = meta[String(r['段落ID'])]; if (!m) return;
-      s.getRange(r._row, ai + 1).setValue(m.audience); s.getRange(r._row, gi + 1).setValue(m.age); s.getRange(r._row, xi + 1).setValue(m.context);
+      s.getRange(r._row, ai + 1).setValue(safeCell_(m.audience)); s.getRange(r._row, gi + 1).setValue(safeCell_(m.age)); s.getRange(r._row, xi + 1).setValue(safeCell_(m.context));
     });
   }
   return { links: rows.length, main: rows.filter(r => r[lh.indexOf('標籤')] === KG_TAG_MAIN).length, candidates: added, candidateHits: merged };
@@ -297,7 +297,7 @@ function adminCandAction(candId, action, opts) {
   } else if (action === 'merge') {
     const t = byId[opts.target]; if (!t) throw new Error('請選擇要合併到的節點');
     const syn = String(t['同義說法'] || '').split('、').filter(Boolean); if (syn.indexOf(r['名稱']) < 0) syn.push(String(r['名稱']));
-    sh_('kgNodes').getRange(t._row, kgHead_('kgNodes').indexOf('同義說法') + 1).setValue(syn.join('、'));
+    sh_('kgNodes').getRange(t._row, kgHead_('kgNodes').indexOf('同義說法') + 1).setValue(safeCell_(syn.join('、')));
     if (chunkIds.length) append_('kgLinks', chunkIds.map(c => linkRow(c, String(opts.target), '候選合併')));
     result = String(opts.target);
   } else if (action !== 'skip') throw new Error('未知的操作');

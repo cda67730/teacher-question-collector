@@ -16,9 +16,9 @@ function doGet(e) {
 function doPost(e) {
   try {
     const req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
-    const info = codeInfo_(req.code);
-    if (!info) return json_({ ok: false, error: '邀請碼不正確或已停用' });
-    const school = info.school;
+    const vc = verifyCode_(req.code);
+    if (vc.error) return json_({ ok: false, error: vc.error });
+    const info = vc.info, school = info.school;
     if (!rateOk_(req.code)) return json_({ ok: false, error: '使用次數過多，請稍後再試' });
     req.school = school;
     switch (req.action) {
