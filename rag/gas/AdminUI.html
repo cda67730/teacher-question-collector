@@ -240,6 +240,17 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
     <div class="row"><input type="file" id="kgFile" accept=".json,application/json" style="width:auto"><button class="btn pri" id="kgImport">匯入</button><span class="note" id="kgImpStatus"></span></div>
   </div>
   <div class="box">
+    <h4>依現有文件產生知識圖譜與 Ontology</h4>
+    <p class="note">AI 讀取所有「已核可」文件的段落，抽出概念、整理成主軸／子分類階層與關係，產生 knowledge-graph.json 與 ontology.ttl 供下載。<b>不會改動系統裡現有的圖譜</b>；專家看過、修改後，再用上方「匯入」匯入。</p>
+    <div class="row"><button class="btn" id="kgGen">產生圖譜檔案</button><span class="note" id="kgGenStatus"></span></div>
+    <div id="kgGenWarn" hidden style="margin-top:8px;border:1px solid var(--warn);border-radius:8px;padding:10px 12px;background:#fdf6ea">
+      <b>產生前請確認</b>
+      <ul id="kgGenInfo" style="margin:6px 0;padding-left:18px;font-size:13px"></ul>
+      <div class="row"><button class="btn pri" id="kgGenGo">我了解，開始產生</button><button class="btn" id="kgGenCancel">取消</button></div>
+    </div>
+    <div id="kgGenOut" hidden style="margin-top:8px"></div>
+  </div>
+  <div class="box">
     <h4>新節點候選（待審核 <span id="kgCandN">0</span>）</h4>
     <p class="note">上傳文件時，AI 發現段落內容在現有節點裡找不到合適位置，就會提出候選。多份文件都提到的排前面。核可＝新增節點並掛上這些段落；合併＝把名稱加到既有節點的同義說法；略過＝不處理。</p>
     <div id="kgCands"></div>
@@ -792,6 +803,46 @@ $('kgMap').onclick = async () => {
   catch (e) { $('kgMapStatus').textContent = '失敗：' + e.message; } finally { $('kgMap').disabled = false; }
 };
 document.querySelector('nav button[data-t="kg"]').addEventListener('click', loadGraph);
+// ---------- 產生圖譜檔案 ----------
+let KGEN = null;
+$('kgGen').onclick = async () => {
+  $('kgGen').disabled = true; $('kgGenStatus').textContent = '統計文件中…'; $('kgGenOut').hidden = true;
+  try {
+    KGEN = await run('adminKgGenStart');
+    $('kgGenStatus').textContent = '';
+    if (!KGEN.chunks) { toast('沒有已核可的文件，請先上傳並核可文件', 5000); return; }
+    $('kgGenInfo').innerHTML = [
+      `將讀取已核可文件 <b>${KGEN.docs}</b> 份、共 <b>${KGEN.chunks}</b> 段，分 ${KGEN.batches} 批處理，約需 ${Math.max(1, Math.round(KGEN.batches * 20 / 60))}–${Math.max(2, Math.round(KGEN.batches * 40 / 60))} 分鐘，並會使用「回答模型」呼叫 AI 約 ${KGEN.batches + 1} 次（會產生費用）。處理期間請不要關閉這個頁面。`,
+      KGEN.few ? '<span class="bad">資料偏少（建議至少 10 份文件、80 段以上）：產生的主題與階層容易偏向少數文件，未必正確，請當作草稿參考。</span>' : '資料量越多、涵蓋越廣，結果越穩定；結果仍是 AI 草稿，需專家逐一確認。',
+      '只產生檔案下載，不會改動系統裡現有的圖譜與標註。',
+      '若之後匯入這份圖譜，節點會整批更換，所有文件需要<b>重新標註</b>（到下方「標註文件」執行）；標註不需要重新產生向量。',
+    ].map(x => `<li>${x}</li>`).join('');
+    $('kgGenWarn').hidden = false;
+  } catch (e) { $('kgGenStatus').textContent = '失敗：' + e.message; } finally { $('kgGen').disabled = false; }
+};
+$('kgGenCancel').onclick = () => { $('kgGenWarn').hidden = true; };
+$('kgGenGo').onclick = async () => {
+  $('kgGenWarn').hidden = true; $('kgGen').disabled = true;
+  const items = []; const fails = [];
+  try {
+    for (let i = 0; i < KGEN.batches; i++) {
+      $('kgGenStatus').textContent = `抽取概念中 ${i + 1}／${KGEN.batches}…（已找到 ${items.length} 個）`;
+      try { const r = await run('adminKgGenBatch', i); items.push(...r.items); }
+      catch (e) { try { const r = await run('adminKgGenBatch', i); items.push(...r.items); } catch (e2) { fails.push(i + 1); } }
+    }
+    if (!items.length) throw new Error('沒有抽出任何概念');
+    $('kgGenStatus').textContent = `整理階層與關係中…（${items.length} 個概念）`;
+    const r = await run('adminKgGenFinish', items);
+    const dl = (name, text, type) => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: type })); a.download = name; a.textContent = name; a.className = 'btn'; a.style.textDecoration = 'none'; return a; };
+    const out = $('kgGenOut'); out.innerHTML = `<p style="margin:0 0 6px">完成：抽出 ${r.extracted} 筆 → 合併成 ${r.merged} 個概念 → 保留 ${r.kept} 個；共 ${r.stats.nodes} 個節點（含主軸與子分類）、${r.stats.edges} 條關係、${r.stats.sources} 份來源文件。${fails.length ? `<span class="bad">第 ${fails.join('、')} 批失敗，結果可能不完整。</span>` : ''}</p>`;
+    const row = document.createElement('div'); row.className = 'row';
+    const stamp = new Date().toISOString().slice(0, 10);
+    row.appendChild(dl('knowledge-graph-' + stamp + '.json', r.json, 'application/json'));
+    row.appendChild(dl('ontology-' + stamp + '.ttl', r.ttl, 'text/turtle'));
+    out.appendChild(row); out.hidden = false;
+    $('kgGenStatus').textContent = '';
+  } catch (e) { $('kgGenStatus').textContent = '產生失敗：' + e.message; } finally { $('kgGen').disabled = false; }
+};
 
 $('loginForm').onsubmit = async (e) => {
   e.preventDefault(); $('lgBtn').disabled = true; $('lgErr').textContent = '';
