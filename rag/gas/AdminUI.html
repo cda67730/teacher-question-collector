@@ -65,6 +65,23 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
 .conv .msg.cur{outline:2px solid var(--accent)}
 .res-命中{color:var(--ok);font-weight:600} .res-未達門檻{color:var(--warn);font-weight:600} .res-沒找到{color:var(--err);font-weight:600}
 .cand-ok{color:var(--ok);font-weight:600}
+.ov{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 12px;font-size:13px}
+.ov a{border:1px solid var(--line);border-radius:8px;padding:5px 10px;cursor:pointer;color:var(--ink);text-decoration:none;background:#fff}
+.ov a:hover{border-color:var(--accent)} .ov .arr{color:var(--muted)} .ov .offc{color:var(--muted);text-decoration:line-through}
+.setwrap{display:grid;grid-template-columns:150px minmax(0,1fr);gap:16px;align-items:start}
+.setnav{position:sticky;top:52px;display:flex;flex-direction:column;gap:2px}
+.setnav a{padding:6px 10px;border-radius:8px;cursor:pointer;color:var(--muted);font-size:13px}
+.setnav a:hover{background:var(--bg)} .setnav a.on{background:var(--soft);color:var(--accent);font-weight:600}
+.sec{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:14px;scroll-margin-top:60px}
+.sec>h4{margin:0 0 4px;font-size:15px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.sec>h4 label{margin:0;font-weight:400;font-size:13px}
+.sec.off .fld{color:var(--muted)} .sec.off .fld input,.sec.off .fld select,.sec.off .fld textarea{background:var(--bg)}
+.fld{padding:8px 0;border-top:1px solid var(--line)} .fld:first-of-type{border-top:0}
+.fld>label{margin:0 0 4px} .fld .key{font-size:11px;color:#9aa5b1;font-weight:400;margin-left:6px}
+.fld details summary{cursor:pointer;color:var(--accent);font-size:13px;margin-top:2px}
+.fld.dirty>label::after{content:'已修改';font-size:11px;color:var(--warn);margin-left:8px;font-weight:400}
+.savebar{position:sticky;bottom:0;background:#fff;border-top:1px solid var(--line);padding:10px 0;display:flex;justify-content:flex-end;align-items:center;gap:12px;z-index:2}
+@media (max-width:760px){.setwrap{grid-template-columns:1fr}.setnav{position:static;flex-direction:row;flex-wrap:wrap}}
 .cand{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:8px 0}
 .cand .q{font-size:12px;color:var(--muted);background:var(--bg);border-radius:6px;padding:6px 8px;margin:6px 0;white-space:pre-wrap}
 .zero{color:var(--err)} .nodechip.sub{background:var(--bg);color:var(--muted)} .warn{color:var(--warn);font-size:12px;margin-top:4px} .nodechip{display:inline-block;font-size:12px;background:var(--soft);color:var(--accent);border-radius:999px;padding:0 8px;margin:2px 4px 0 0}
@@ -86,15 +103,19 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
 
 <section id="bot" class="on">
   <h3>機器人設定 <span class="note">修改後按儲存，約 1 分鐘內生效</span></h3>
+  <div id="ovBar" class="ov"></div>
   <div class="box" id="modelBox">
     <div class="row" style="justify-content:space-between"><h4 style="margin:0">可用模型 <span class="note" id="modelSum">讀取中…</span></h4>
       <div class="row"><button class="btn" data-preset="g3" style="padding:4px 10px;font-size:12px">套用 Gemini 3 組合</button><button class="btn" data-preset="oa" style="padding:4px 10px;font-size:12px">套用 OpenAI 組合</button><button class="btn" data-preset="g25" style="padding:4px 10px;font-size:12px">還原 2.5 組合</button><button class="btn" id="modelList" style="padding:4px 10px;font-size:12px">看清單</button><button class="btn" id="modelRefresh" style="padding:4px 10px;font-size:12px">重新讀取</button></div></div>
-    <p class="note" style="margin:4px 0 0">清單直接向 Gemini API 查詢這把金鑰能用的模型。下方 model_ 開頭的設定可直接選；選好可按「測試」確認能用與速度。Gemini 3 以上會自動改用官方建議的參數（溫度維持預設、思考等級 low）。</p>
-    <p class="note" style="margin:4px 0 0">Gemini 3 組合：分流與重排用 3.1 Flash-Lite（快、省），回答用 3.8 Flash，檢查用 3.6 Flash。OpenAI 組合：分流與重排用 GPT-6 Luna，回答與檢查用 GPT-6.1 Terra（同系列幻覺率最低）。套用後會直接儲存，可再逐一測試。向量模型不在組合內，要換需重新上傳文件。用 OpenAI 要先在指令碼屬性加 OPENAI_API_KEY。</p>
+    <p class="note" style="margin:4px 0 0">清單直接向 Gemini／OpenAI 查詢金鑰能用的模型；各步驟的模型在下方對應區塊選，選好可按「測試」。Gemini 3 以上會自動改用官方建議的參數。
+    Gemini 3 組合：分流與重排用 3.1 Flash-Lite（快、省），回答用 3.8 Flash，檢查用 3.6 Flash。OpenAI 組合：分流與重排用 GPT-6 Luna，回答與檢查用 GPT-6.1 Terra（同系列幻覺率最低）。套用後會直接儲存，可再逐一測試。向量模型不在組合內，要換需重新上傳文件。用 OpenAI 要先在指令碼屬性加 OPENAI_API_KEY。</p>
     <div id="modelTable" hidden style="margin-top:8px;max-height:360px;overflow:auto"></div>
   </div>
-  <div id="settings"></div>
-  <p><button class="btn pri" id="saveSettings">儲存設定</button></p>
+  <div class="setwrap">
+    <div class="setnav" id="setNav"></div>
+    <div id="settings"></div>
+  </div>
+  <div class="savebar"><span class="note" id="dirtyN"></span><button class="btn pri" id="saveSettings">儲存設定</button></div>
 </section>
 
 <section id="skill">
@@ -286,19 +307,95 @@ async function load() {
 }
 
 // ---------- 設定 ----------
-const LONG = ['system_prompt', 'welcome', 'continue_prompt', 'continue_options', 'triage_rules', 'followup_prompt', 'answer_rules', 'check_prompt', 'msg_no_knowledge', 'msg_check_failed', 'msg_out_of_scope'];
-function renderSettings() {
-  $('settings').innerHTML = D.settings.map((s, i) => {
-    const v = s.value; const isBool = v === true || v === false || String(v).toUpperCase() === 'TRUE' || String(v).toUpperCase() === 'FALSE';
-    const mk = /^model_/.test(s.key) ? (s.key === 'model_embed' ? 'embed' : 'gen') : '';
-    if (mk) return `<label>${esc(s.key)} <span class="note">${esc(s.note)}</span></label><div class="row" style="flex-wrap:nowrap"><select data-i="${i}" data-model="${mk}" data-orig="${esc(v)}"><option value="${esc(v)}">${esc(v)}</option></select><button class="btn" type="button" data-ping="${i}" style="white-space:nowrap">測試</button></div><div class="note" data-pr="${i}"></div>`;
-    const input = LONG.includes(s.key) ? `<textarea data-i="${i}" rows="${s.key === 'system_prompt' ? 14 : /rules|prompt/.test(s.key) ? 7 : 3}">${esc(v)}</textarea>`
-      : isBool ? `<label style="font-weight:400"><input type="checkbox" data-i="${i}" ${String(v).toUpperCase() === 'TRUE' ? 'checked' : ''}> 啟用</label>`
-      : `<input type="text" data-i="${i}" value="${esc(v)}">`;
-    return `<label>${esc(s.key)} <span class="note">${esc(s.note)}</span></label>${input}`;
-  }).join('');
-  fillModelSelects();
+const LONG = ['system_prompt', 'welcome', 'continue_prompt', 'continue_options', 'triage_rules', 'followup_prompt', 'answer_rules', 'check_prompt', 'msg_no_knowledge', 'msg_check_failed', 'msg_ai_fallback', 'msg_out_of_scope'];
+// 依流程步驟分區：toggle＝標題列的總開關；沒列到的新設定會自動放進「進階」
+const SECTIONS = [
+  { id: 'basic', title: '基本', keys: ['bot_name', 'welcome', 'system_prompt', 'default_skill'] },
+  { id: 'triage', title: 'L4 分流', toggle: 'enable_triage', keys: ['model_triage', 'triage_rules', 'followup_prompt', 'max_followups'] },
+  { id: 'retrieval', title: '檢索與重排', keys: ['top_k', 'min_score', 'enable_rerank', 'model_rerank', 'rerank_pool', 'quota_min_actionable', 'quota_max_principle'] },
+  { id: 'answer', title: '回答', keys: ['model_answer', 'temperature', 'answer_rules', 'knowledge_only', 'full_answer_rounds', 'continue_prompt', 'continue_options'] },
+  { id: 'check', title: 'L5 檢查', toggle: 'enable_llm_check', keys: ['enable_relevance_check', 'model_check', 'check_prompt'] },
+  { id: 'msgs', title: '固定訊息', keys: ['msg_no_knowledge', 'msg_check_failed', 'msg_ai_fallback', 'msg_out_of_scope'] },
+  { id: 'adv', title: '進階', keys: ['model_embed', 'embed_dim', 'chunk_size', 'chunk_overlap', 'enable_node_mapping', 'hourly_limit'], rest: true },
+];
+const LABELS = {
+  bot_name: '機器人名稱', welcome: '歡迎訊息', system_prompt: '固定 system prompt', default_skill: '預設 Skill',
+  enable_triage: '啟用', model_triage: '分流模型', triage_rules: '分流規則', followup_prompt: '追問方式', max_followups: '最多追問次數',
+  top_k: '採用段數', min_score: '相似度門檻', enable_rerank: 'AI 重新排序', model_rerank: '重排模型', rerank_pool: '重排候選段數',
+  quota_min_actionable: '至少保留的具體做法段數', quota_max_principle: '原則／背景最多段數',
+  model_answer: '回答模型', temperature: '溫度', answer_rules: '回答規則', knowledge_only: '只用知識庫回答', full_answer_rounds: '完整回答輪數',
+  continue_prompt: '延續回覆方式', continue_options: '延續回覆選項',
+  enable_llm_check: '啟用', enable_relevance_check: '回應度檢查', model_check: '檢查模型', check_prompt: '檢查標準',
+  msg_no_knowledge: '查不到資料時', msg_check_failed: '檢查沒通過時', msg_ai_fallback: 'AI 補足時的提示', msg_out_of_scope: '超出服務範圍時',
+  model_embed: '向量模型', embed_dim: '向量維度', chunk_size: '切段長度（字）', chunk_overlap: '切段重疊（字）', enable_node_mapping: '上傳時標註知識圖譜', hourly_limit: '每個邀請碼每小時上限',
+};
+const isBoolV = v => v === true || v === false || String(v).toUpperCase() === 'TRUE' || String(v).toUpperCase() === 'FALSE';
+function fieldHtml(s, i) {
+  const v = s.value, lab = `<label>${esc(LABELS[s.key] || s.key)}<span class="key">${esc(s.key)}</span><br><span class="note">${esc(s.note)}</span></label>`;
+  const mk = /^model_/.test(s.key) ? (s.key === 'model_embed' ? 'embed' : 'gen') : '';
+  let input;
+  if (mk) input = `<div class="row" style="flex-wrap:nowrap"><select data-i="${i}" data-model="${mk}" data-orig="${esc(v)}"><option value="${esc(v)}">${esc(v)}</option></select><button class="btn" type="button" data-ping="${i}" style="white-space:nowrap">測試</button></div><div class="note" data-pr="${i}"></div>`;
+  else if (LONG.includes(s.key)) {
+    const ta = `<textarea data-i="${i}" rows="${s.key === 'system_prompt' ? 14 : /rules|prompt/.test(s.key) ? 8 : 3}">${esc(v)}</textarea>`;
+    input = /rules|prompt|options/.test(s.key) ? `<details><summary>編輯文字（${String(v).length} 字）</summary>${ta}</details>` : ta;
+  }
+  else if (isBoolV(v)) input = `<label style="font-weight:400;margin:0"><input type="checkbox" data-i="${i}" ${String(v).toUpperCase() === 'TRUE' ? 'checked' : ''}> 開啟</label>`;
+  else input = `<input type="text" data-i="${i}" value="${esc(v)}" style="max-width:${/^(msg_|welcome|bot_name|default_skill)/.test(s.key) ? '100%' : '220px'}">`;
+  return `<div class="fld" data-k="${esc(s.key)}">${lab}${input}</div>`;
 }
+function renderSettings() {
+  const idx = {}; D.settings.forEach((s, i) => idx[s.key] = i);
+  const used = {}; SECTIONS.forEach(sec => { (sec.toggle ? [sec.toggle] : []).concat(sec.keys).forEach(k => used[k] = true); });
+  $('settings').innerHTML = SECTIONS.map(sec => {
+    const keys = sec.keys.concat(sec.rest ? D.settings.map(s => s.key).filter(k => !used[k]) : []).filter(k => idx[k] != null);
+    const t = sec.toggle && idx[sec.toggle] != null ? D.settings[idx[sec.toggle]] : null;
+    const head = t ? `<label title="${esc(t.note)}"><input type="checkbox" data-i="${idx[sec.toggle]}" data-toggle="${sec.id}" ${String(t.value).toUpperCase() === 'TRUE' ? 'checked' : ''}> 開啟</label>` : '';
+    const body = keys.map(k => fieldHtml(D.settings[idx[k]], idx[k])).join('');
+    const inner = `<h4>${esc(sec.title)}${head}</h4>${t ? `<div class="note" style="margin-bottom:4px">${esc(t.note)}</div>` : ''}${body}`;
+    return `<div class="sec" id="sec-${sec.id}">${sec.id === 'adv' ? `<details><summary style="cursor:pointer;font-weight:600">進階 <span class="note">很少需要改；換向量模型或切段方式要重新上傳文件</span></summary>${inner.replace('<h4>進階</h4>', '')}</details>` : inner}</div>`;
+  }).join('');
+  $('setNav').innerHTML = SECTIONS.map(sec => `<a data-go="${sec.id}">${esc(sec.title)}</a>`).join('');
+  $('setNav').querySelectorAll('a').forEach(a => a.onclick = () => goSec(a.dataset.go));
+  fillModelSelects(); refreshOverview(); markDirty();
+}
+function goSec(id) {
+  const el = $('sec-' + id); if (!el) return;
+  const d = el.querySelector('details'); if (d) d.open = true;
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  $('setNav').querySelectorAll('a').forEach(a => a.classList.toggle('on', a.dataset.go === id));
+}
+// 目前設定總覽：各步驟的開關與模型，跟著畫面上的值即時更新，點了跳到該區
+function curVal(key) {
+  const i = D.settings.findIndex(s => s.key === key); if (i < 0) return null;
+  const el = $('settings').querySelector(`[data-i="${i}"]`); if (!el) return D.settings[i].value;
+  return el.type === 'checkbox' ? el.checked : el.value;
+}
+const onv = k => { const v = curVal(k); return v == null ? true : v === true || String(v).toUpperCase() === 'TRUE'; };
+const shortM = m => String(m || '').replace(/^gemini-/, '').replace(/-preview$/, '');
+function refreshOverview() {
+  const chip = (id, on, txt) => `<a data-go="${id}"${on ? '' : ' class="offc"'}>${txt}</a>`;
+  $('ovBar').innerHTML = '<span class="note">目前流程：</span>' + [
+    chip('triage', onv('enable_triage'), 'L4 分流 ' + (onv('enable_triage') ? shortM(curVal('model_triage')) : '關')),
+    chip('retrieval', true, '檢索 ' + (curVal('top_k') || '') + ' 段・門檻 ' + (curVal('min_score') || '') + '｜重排 ' + (onv('enable_rerank') ? shortM(curVal('model_rerank')) : '關')),
+    chip('answer', true, '回答 ' + shortM(curVal('model_answer')) + (onv('knowledge_only') ? '・只用知識庫' : '・可 AI 補足')),
+    chip('check', onv('enable_llm_check') || onv('enable_relevance_check'), 'L5 ' + (onv('enable_llm_check') ? '依據' : '') + (onv('enable_llm_check') && onv('enable_relevance_check') ? '＋' : '') + (onv('enable_relevance_check') ? '回應度' : '') + (onv('enable_llm_check') || onv('enable_relevance_check') ? ' ' + shortM(curVal('model_check')) : '關')),
+  ].join('<span class="arr">→</span>');
+  $('ovBar').querySelectorAll('a').forEach(a => a.onclick = () => goSec(a.dataset.go));
+  SECTIONS.filter(s => s.toggle).forEach(s => { const el = $('sec-' + s.id); if (el) el.classList.toggle('off', !onv(s.toggle)); });
+}
+function markDirty() {
+  let n = 0;
+  $('settings').querySelectorAll('[data-i]').forEach(el => {
+    const s = D.settings[+el.dataset.i]; const v = el.type === 'checkbox' ? el.checked : el.value;
+    const orig = el.type === 'checkbox' ? String(s.value).toUpperCase() === 'TRUE' : String(s.value == null ? '' : s.value);
+    const d = el.type === 'checkbox' ? v !== orig : String(v) !== orig;
+    if (d) n++;
+    const f = el.closest('.fld'); if (f) f.classList.toggle('dirty', d);
+  });
+  $('dirtyN').textContent = n ? `已修改 ${n} 項，尚未儲存` : '';
+}
+$('settings').addEventListener('input', () => { refreshOverview(); markDirty(); });
+$('settings').addEventListener('change', () => { refreshOverview(); markDirty(); });
 // ---------- 模型清單 ----------
 let MODELS = null;
 const mLabel = m => m.id + (m.name && m.name !== m.id ? '｜' + m.name : '');
@@ -365,7 +462,7 @@ $('saveSettings').onclick = async () => {
     return { key: s.key, value };
   });
   $('saveSettings').disabled = true;
-  try { await run('adminSaveSettings', list); toast('已儲存設定'); } catch (e) { toast('儲存失敗：' + e.message, 5000); }
+  try { await run('adminSaveSettings', list); list.forEach(x => { const s = D.settings.find(y => y.key === x.key); if (s) s.value = x.value; }); markDirty(); toast('已儲存設定'); } catch (e) { toast('儲存失敗：' + e.message, 5000); }
   finally { $('saveSettings').disabled = false; }
 };
 
