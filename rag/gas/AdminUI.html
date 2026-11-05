@@ -95,6 +95,7 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
   <button data-t="kg">知識圖譜</button>
   <button data-t="test">測試對話</button>
   <button data-t="logs">對話紀錄</button>
+  <button data-t="qa">問題統計</button>
   <button data-t="eval">命中率測試</button>
   <button data-t="other">其他設定</button>
   <span class="me" id="me">載入中…</span>
@@ -197,6 +198,29 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
         真正的命中率要用「命中率測試」分頁，以專家標好的題目來量</div>
     </div>
   </div>
+</section>
+
+<section id="qa">
+  <div class="row" style="justify-content:space-between">
+    <h3 style="margin:0">問題統計 <span class="note">知識不足 → 交給專家補文件；L5 發現的問題 → 調整 Skill、提示詞或檢查標準</span></h3>
+    <div class="row">
+      <select id="qDays" style="width:auto"><option value="7">最近 7 天</option><option value="30" selected>最近 30 天</option><option value="90">最近 90 天</option><option value="0">全部</option></select>
+      <label style="font-weight:400;margin:0"><input type="checkbox" id="qTest"> 含後台測試</label>
+      <button class="btn" id="qLoad">重新整理</button>
+    </div>
+  </div>
+  <div class="kpis" id="qKpis"></div>
+  <div class="grid2" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr)">
+    <div class="box">
+      <div class="row" style="justify-content:space-between"><h4 style="margin:0">知識不足</h4><button class="btn" id="qCsv" style="padding:3px 10px;font-size:12px">下載問題清單 CSV</button></div>
+      <div id="qGap" style="font-size:13px"></div>
+    </div>
+    <div class="box">
+      <h4>L5 發現的問題</h4>
+      <div id="qL5" style="font-size:13px"></div>
+    </div>
+  </div>
+  <p class="note">只統計更新後的新對話。點時間可以打開該回合的完整流程。</p>
 </section>
 
 <section id="eval">
@@ -647,6 +671,43 @@ async function loadLogs() {
 $('lQ').onkeydown = e => { if (e.key === 'Enter') loadLogs(); };
 $('lLoad').onclick = loadLogs;
 document.querySelector('nav button[data-t="logs"]').addEventListener('click', () => { if (!logsLoaded) loadLogs(); });
+// ---------- 問題統計 ----------
+let Q = null;
+const cnt = (o, total, extra) => Object.keys(o).sort((a, b) => o[b] - o[a]).map(x => `<li>${esc(x)} <b>${o[x]}</b>${total ? ` <span class="note">${Math.round(o[x] / total * 100)}%</span>` : ''}${extra ? extra(x) : ''}</li>`).join('') || '<li class="note">沒有</li>';
+async function loadQA() {
+  $('qLoad').disabled = true; $('qGap').innerHTML = $('qL5').innerHTML = '<p class="note">載入中…</p>';
+  try {
+    const r = await run('adminLogs', { days: +$('qDays').value, includeTest: $('qTest').checked });
+    Q = r.quality; const g = Q.gap, l = Q.l5;
+    const pct = (a, b) => b ? Math.round(a / b * 1000) / 10 + '%' : '—';
+    $('qKpis').innerHTML = k(Q.turns, '統計回合') + k(pct(g.n, Q.retrieval), '知識不足比例', g.n + '／' + Q.retrieval + ' 個有檢索的回合', g.n && g.n / Math.max(1, Q.retrieval) > 0.2 ? 'bad' : '') +
+      k(g.byOutcome['保守回答'] || 0, '知識不足 → 保守回答') + k(g.byOutcome['AI 補足'] || 0, '知識不足 → AI 補足') +
+      k(pct(l.any, l.checked), 'L5 有發現問題', l.any + '／' + l.checked + ' 個回答') + k(l.severe, '有嚴重問題', '會擋下並重寫', l.severe ? 'bad' : '') +
+      k(l.outcome['重寫後仍未通過 → 保守回答'] || 0, '重寫後仍未通過', '最後給保守回答');
+    $('qGap').innerHTML = !g.n ? '<p class="note">這段期間沒有知識不足的情況</p>' :
+      `<b>原因</b><ul style="margin:2px 0 6px;padding-left:18px">${cnt(g.byKind, g.n)}</ul>` +
+      `<b>處理方式</b><ul style="margin:2px 0 6px;padding-left:18px">${cnt(g.byOutcome, g.n)}</ul>` +
+      `<b>依主題</b> <span class="note">哪些主題最缺資料</span><ul style="margin:2px 0 6px;padding-left:18px">${cnt(g.byTopic, g.n)}</ul>` +
+      `<b>老師想要但找不到的</b> <span class="note">（提問焦點）</span><div class="list" style="max-height:360px;margin-top:4px"><table><thead><tr><th>時間</th><th>提問焦點／原話</th><th>原因</th></tr></thead><tbody>${g.list.slice(0, 80).map(x =>
+        `<tr><td class="note"><a data-row="${x.row}" style="cursor:pointer">${esc(x.time.slice(5, 16))}</a></td><td>${esc(x.focus || x.msg)}${x.focus && x.focus !== x.msg ? `<br><span class="note">${esc(x.msg.slice(0, 60))}</span>` : ''}</td><td class="note">${esc(x.kind)}<br>${esc(x.outcome)}</td></tr>`).join('')}</tbody></table></div>`;
+    $('qL5').innerHTML = !l.any ? '<p class="note">這段期間 L5 沒有發現問題（或 L5 未開啟）</p>' :
+      `<b>問題類型</b> <span class="note">次數（其中嚴重）</span><ul style="margin:2px 0 6px;padding-left:18px">${cnt(l.byType, 0, x => l.severeByType[x] ? ` <span class="bad">嚴重 ${l.severeByType[x]}</span>` : '')}</ul>` +
+      `<b>結果</b><ul style="margin:2px 0 6px;padding-left:18px">${cnt(l.outcome, l.any)}</ul>` +
+      `<b>最近的例子</b><div class="list" style="max-height:360px;margin-top:4px"><table><thead><tr><th>時間</th><th>問題</th></tr></thead><tbody>${l.list.slice(0, 60).map(x =>
+        `<tr><td class="note"><a data-row="${x.row}" style="cursor:pointer">${esc(x.time.slice(5, 16))}</a><br>${esc(x.outcome)}</td><td>${x.items.map(i => `${i.severe ? '<span class="bad">【嚴重】</span>' : ''}${esc(i.type)}：${esc(i.note)}${i.attempt ? ' <span class="note">（重寫版）</span>' : ''}`).join('<br>')}<br><span class="note">${esc(x.msg.slice(0, 60))}</span></td></tr>`).join('')}</tbody></table></div>`;
+    document.querySelectorAll('#qGap a[data-row], #qL5 a[data-row]').forEach(a => a.onclick = () => openDetail(+a.dataset.row));
+  } catch (e) { $('qGap').innerHTML = `<p class="bad">${esc(e.message)}</p>`; $('qL5').innerHTML = ''; }
+  finally { $('qLoad').disabled = false; }
+}
+['qDays', 'qTest'].forEach(id => $(id).onchange = loadQA);
+$('qLoad').onclick = loadQA;
+document.querySelector('nav button[data-t="qa"]').addEventListener('click', () => { if (!Q) loadQA(); });
+$('qCsv').onclick = () => {
+  if (!Q || !Q.gap.list.length) return toast('沒有資料');
+  const cell = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const csv = '\ufeff' + [['時間', '單位', '提問焦點', '老師原話（去識別化）', '原因', '處理方式', '主題', '最高相似度']].concat(Q.gap.list.map(x => [x.time, x.school, x.focus, x.msg, x.kind, x.outcome, x.topics, x.top])).map(r => r.map(cell).join(',')).join('\n');
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = '知識不足清單-' + new Date().toISOString().slice(0, 10) + '.csv'; a.click();
+};
 
 // 側邊明細
 let SD = null, sTab = 'trace';

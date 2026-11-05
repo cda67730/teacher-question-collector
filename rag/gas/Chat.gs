@@ -43,6 +43,7 @@ function runChat_(req, opts) {
   const T = (step, detail, kind) => trace.push({ step: step, kind: kind || (typeof detail === 'string' ? 'text' : 'json'), detail: detail, ms: Date.now() - t0 });
   const metrics = { retrieved: null, top: null, cited: null, skills: [] };
   const stab = stabReset_();
+  const quality = { gap: null, l5: [] };   // 知識不足與 L5 發現的問題，寫進對話紀錄「品質問題」欄做統計
   const C = cfgAll_();
   const maxFu = Number(C.max_followups == null ? 1 : C.max_followups);
 
@@ -92,6 +93,7 @@ function runChat_(req, opts) {
   const base = { nameMap: d.map, deidText: d.text, triage: tri, metrics: metrics, intent: intent, newCase: isNew, answered: answered };
   const finish = (out) => {
     const res = Object.assign(base, out, { ms: Date.now() - t0 });
+    res.quality = quality;
     res.stability = { models: { triage: useTriage ? C.model_triage : '', answer: C.model_answer, check: C.model_check, rerank: C.model_rerank || '' }, ev: stab.ev, rewriteWhy: stab.rewriteWhy || [] };
     try { logTurn_(req, res, trace); } catch (e) { console.warn(e); }
     if (opts.trace) res.trace = trace;
@@ -147,7 +149,9 @@ function runChat_(req, opts) {
   let fallback = false;
   if (mode === 'full' && (!hits.length || !rr.direct)) {
     const why = hits.length ? '沒有能直接回答焦點的段落（只有背景或原則）' : '沒有可用知識';
-    if (truthy_(C.knowledge_only == null || C.knowledge_only === '' ? true : C.knowledge_only)) {
+    const kOnly = truthy_(C.knowledge_only == null || C.knowledge_only === '' ? true : C.knowledge_only);
+    quality.gap = { kind: hits.length ? '只有背景或原則' : '沒有可用知識', outcome: kOnly ? '保守回答' : 'AI 補足', focus: focus, topics: tri.topics || [], top: metrics.top };
+    if (kOnly) {
       T('P10 降級', why + ' → 保守回答，記為知識缺口');
       return finish({ type: 'conservative', message: conservativeMsg_(refTable), sources: [] });
     }
@@ -180,11 +184,13 @@ function runChat_(req, opts) {
     stabAt_('L5');
     chk = checks_(caseText, ans, hits, C, range, focus, fallback);
     T('檢查', chk.items, 'checks');
+    if ((chk.l5 && chk.l5.length) || chk.relFail) quality.l5.push({ attempt: attempt, issues: chk.l5 || [], relevance: chk.relFail || null });
     if (chk.pass) break;
     (stab.rewriteWhy = stab.rewriteWhy || []).push.apply(stab.rewriteWhy, chk.items.filter(x => !x.pass).map(x => x.name));
     rewritten = true;
   }
   if (!chk.pass) {
+    quality.l5Final = '保守回答';
     T('P10 降級', '重寫後仍未通過 → 保守回答：' + chk.reasons.join('；'));
     return finish({ type: 'conservative', message: conservativeMsg_(refTable, 'check'), sources: [], checks: chk.items });
   }
@@ -294,7 +300,7 @@ function assemble_(sys, skillText, tri, caseText, hits, history, ref, refWho, fe
 // ---------- 檢查：P08 規則、P09 出處、L5 依據與轉介 ----------
 function checks_(caseText, ans, hits, C, range, focus, fallback) {
   range = range || [2, 3];
-  const items = [], reasons = [];
+  const items = [], reasons = []; let l5Issues = [], relFail = null;
   const s = JSON.stringify(ans);
   const bad = forbidden_().find(f => f.regex ? new RegExp(f.rule).test(s) : s.indexOf(f.rule) >= 0);
   items.push({ name: 'P08 規則檢查', pass: !bad, note: bad ? '出現禁止用語「' + bad.rule + '」' : '沒有禁止用語' });
@@ -325,6 +331,7 @@ function checks_(caseText, ans, hits, C, range, focus, fallback) {
         // 模型可能回字串或物件，一律轉成「類型：說明」文字
         const issues = (l5.issues || []).map(x => typeof x === 'string' ? { type: '', severe: true, note: x }
           : { type: x.type || '', severe: x.severe !== false, note: x.note || x.issue || x.reason || x.description || JSON.stringify(x) });
+        l5Issues = issues.map(i => ({ type: i.type || '其他', severe: !!i.severe, note: String(i.note).slice(0, 160) }));
         const severe = issues.filter(i => i.severe);
         const txt = i => (i.type ? i.type + '：' : '') + i.note;
         const pass = !severe.length;
@@ -335,12 +342,13 @@ function checks_(caseText, ans, hits, C, range, focus, fallback) {
       if (doRel) {
         const rel = l5.relevance || {};
         const ok2 = rel.addressed !== false;
+        if (!ok2) relFail = { focus: focus, note: str_(rel.note).slice(0, 160) };
         items.push({ name: '回應度', pass: ok2, note: ok2 ? '有直接回應：' + focus : '【嚴重】沒有回應到「' + focus + '」' + (rel.note ? '：' + str_(rel.note) : '') });
         if (!ok2) reasons.push('沒有直接回應老師想要的「' + focus + '」' + (rel.note ? '（' + str_(rel.note) + '）' : '') + '，請先直接回應這一點，策略要具體');
       }
     } catch (e) { items.push({ name: doL5 ? 'L5 依據與轉介' : '回應度', pass: true, note: '檢查未完成（略過）：' + e.message }); }
   }
-  return { pass: items.every(i => i.pass), items: items, reasons: reasons };
+  return { pass: items.every(i => i.pass), items: items, reasons: reasons, l5: l5Issues, relFail: relFail };
 }
 
 function conservativeMsg_(refTable, why) {
@@ -360,5 +368,5 @@ function logTurn_(req, res, trace) {
     JSON.stringify(res.checks || []), res.rewritten ? '是' : '否', res.ms || '',
     m.retrieved == null ? '' : m.retrieved, m.top == null ? '' : m.top, m.cited == null ? '' : m.cited, (m.skills || []).join('、'),
     tr.length > 48000 ? JSON.stringify(trace.map(t => ({ step: t.step, kind: 'text', detail: '（內容過長未保存）', ms: t.ms }))) : tr,
-    JSON.stringify(res.stability || {})]]);
+    JSON.stringify(res.stability || {}), JSON.stringify(res.quality || {})]]);
 }

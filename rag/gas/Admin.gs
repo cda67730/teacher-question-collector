@@ -287,7 +287,48 @@ function adminLogs(opts) {
   all.forEach(r => String(r['引用'] || '').split('｜').filter(Boolean).forEach(x => { const t = x.replace(/^K\d+:/, ''); docCount[t] = (docCount[t] || 0) + 1; }));
   const topDocs = Object.keys(docCount).map(k => ({ title: k, n: docCount[k] })).sort((a, b) => b.n - a.n).slice(0, 10);
   const schools = Array.from(new Set(rows_('logs').map(r => String(r['園所'])).filter(Boolean)));
-  return { stats: stats, stability: stabilityStats_(all), rows: rows.slice(-300).reverse(), gaps: gaps, topDocs: topDocs, schools: schools, typeNames: LOG_TYPE_NAME };
+  return { stats: stats, stability: stabilityStats_(all), quality: qualityStats_(all, rows), rows: rows.slice(-300).reverse(), gaps: gaps, topDocs: topDocs, schools: schools, typeNames: LOG_TYPE_NAME };
+}
+
+/** 品質問題統計：知識不足（交給專家補文件）與 L5 發現的問題（調整 Skill／提示詞） */
+function qualityStats_(all, rows) {
+  const typeOf = {}; rows.forEach(r => typeOf[r.row] = r);
+  const out = { turns: 0, retrieval: 0,
+    gap: { n: 0, byKind: {}, byOutcome: {}, byTopic: {}, list: [] },
+    l5: { checked: 0, any: 0, severe: 0, minorOnly: 0, byType: {}, severeByType: {}, outcome: {}, list: [] } };
+  all.forEach(r => {
+    let q = null; try { q = r['品質問題'] ? JSON.parse(r['品質問題']) : null; } catch (e) {}
+    if (!q) return;
+    out.turns++;
+    const base = typeOf[r._row] || {};
+    if (r['檢索段數'] !== '' && r['檢索段數'] != null) out.retrieval++;
+    const msg = String(r['老師訊息（去識別化）']).slice(0, 160), time = fmt_(r['時間']);
+    if (q.gap) {
+      const g = out.gap; g.n++;
+      g.byKind[q.gap.kind] = (g.byKind[q.gap.kind] || 0) + 1;
+      g.byOutcome[q.gap.outcome] = (g.byOutcome[q.gap.outcome] || 0) + 1;
+      const tps = (q.gap.topics || []).length ? q.gap.topics : ['（沒有對應主題）'];
+      tps.forEach(t => g.byTopic[t] = (g.byTopic[t] || 0) + 1);
+      g.list.push({ row: r._row, time: time, msg: msg, focus: String(q.gap.focus || ''), kind: q.gap.kind, outcome: q.gap.outcome, topics: tps.join('、'), top: q.gap.top, school: base.school || '' });
+    }
+    const type = String(r['回應類型']);
+    if (['answer', 'continue', 'ai_fallback', 'conservative'].indexOf(type) >= 0 && !(q.gap && q.gap.outcome === '保守回答')) out.l5.checked++;
+    const rounds = q.l5 || [];
+    if (rounds.length) {
+      const L = out.l5; L.any++;
+      const all5 = [].concat.apply([], rounds.map(x => (x.issues || []).map(i => Object.assign({ attempt: x.attempt }, i))
+        .concat(x.relevance ? [{ attempt: x.attempt, type: '回應度', severe: true, note: x.relevance.note || ('沒有回應到「' + (x.relevance.focus || '') + '」') }] : [])));
+      const hasSevere = all5.some(i => i.severe);
+      if (hasSevere) L.severe++; else L.minorOnly++;
+      all5.forEach(i => { L.byType[i.type] = (L.byType[i.type] || 0) + 1; if (i.severe) L.severeByType[i.type] = (L.severeByType[i.type] || 0) + 1; });
+      const oc = q.l5Final === '保守回答' ? '重寫後仍未通過 → 保守回答' : !hasSevere ? '只有小問題（不擋）' : rounds.length > 1 || String(r['是否重寫']) === '是' ? '重寫後通過' : '其他';
+      L.outcome[oc] = (L.outcome[oc] || 0) + 1;
+      L.list.push({ row: r._row, time: time, msg: msg, outcome: oc, items: all5.slice(0, 6) });
+    }
+  });
+  out.gap.list = out.gap.list.slice(-200).reverse();
+  out.l5.list = out.l5.list.slice(-100).reverse();
+  return out;
 }
 
 /** 穩定度統計：哪一步、哪個模型、出現什麼格式問題；重寫是因為什麼 */
