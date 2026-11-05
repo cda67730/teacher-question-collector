@@ -91,12 +91,14 @@ function runChat_(req, opts) {
   T('P06 同義詞擴充', exp.concepts.length ? exp.words.join('、') + ' → ' + exp.concepts.join('、') : '無');
 
   const base = { nameMap: d.map, deidText: d.text, triage: tri, metrics: metrics, intent: intent, newCase: isNew, answered: answered };
+  let evalHits = [];   // 自動評測用：最後採用的段落
   const finish = (out) => {
     const res = Object.assign(base, out, { ms: Date.now() - t0 });
     res.quality = quality;
     res.stability = { models: { triage: useTriage ? C.model_triage : '', answer: C.model_answer, check: C.model_check, rerank: C.model_rerank || '' }, ev: stab.ev, rewriteWhy: stab.rewriteWhy || [] };
-    try { logTurn_(req, res, trace); } catch (e) { console.warn(e); }
+    if (!opts.noLog) { try { logTurn_(req, res, trace); } catch (e) { console.warn(e); } }   // 自動評測不寫對話紀錄
     if (opts.trace) res.trace = trace;
+    if (opts.withHits) res.hits = evalHits;
     return res;
   };
 
@@ -142,6 +144,7 @@ function runChat_(req, opts) {
   T('P06 檢索', { minScore: sd.minScore, topK: sd.topK, total: sd.total, cands: sd.cands }, 'retrieval');
   const rr = rerankSelect_(focus, caseText, sd.hits, C);
   const hits = rr.hits;
+  evalHits = hits.map(h => ({ id: h.id, docId: h.docId, ref: h.ref, title: h.title, text: h.text }));
   sd.cands.forEach(c => { c.ref = (hits.find(h => h.id === c.id) || {}).ref || ''; });   // 檢索明細改用最後的 K 編號
   metrics.retrieved = hits.length; metrics.actionable = rr.actionable; metrics.direct = rr.direct;
   if (sd.hits.length) T('重新排序與配額', rr.trace, 'rerank');

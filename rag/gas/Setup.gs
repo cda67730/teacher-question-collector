@@ -96,6 +96,8 @@ const SETTINGS_DEFAULT = [
     ['knowledge_only', true, '只用知識庫回答：開＝知識不足時保守回答；關＝知識不足時由 AI 協助補足（照樣檢查，並標示「知識庫內容不足」）'],
     ['enable_relevance_check', true, '是否檢查回答有沒有直接回應老師的提問焦點（L5 關閉時也可單獨啟用）'],
     ['enable_rerank', true, '是否用 AI 依「能不能回答提問焦點」重新排序檢索結果（每題多一次 AI 呼叫）'],
+    ['model_eval_gen', '', '自動評測出題用模型；留空＝用檢查模型。建議用和回答不同家的模型，避免自己出題自己答'],
+    ['model_eval_judge', '', '自動評測評分用模型；留空＝用檢查模型。建議用和回答不同家的模型，避免自己改自己的考卷'],
     ['enable_node_mapping', false, '上傳文件時就標註（預設關閉：先累積文件，之後在「知識圖譜」分頁一次標註）。開啟時，AI 照 ontology 的標註規格標每一段（主要／次要節點、讀者對象、適用年齡、情境），並提出新節點候選（需先在後台匯入知識圖譜；每份文件多幾次 AI 呼叫）'],
     ['rerank_pool', 12, '重新排序前先取幾段候選'],
     ['quota_min_actionable', 3, '採用的段落中，至少保留幾段「具體做法／案例／溝通範例」'],
@@ -170,6 +172,8 @@ function setup() {
   make(SHEETS.kgLinks, ['段落ID', '節點ID', '方式', '時間', '標籤']);
   make(SHEETS.kgDefs, ['種類', 'ID', '名稱', '定義']);
   make(SHEETS.kgCands, ['候選ID', '名稱', '定義', '建議上層', '類型', '建議關係', '文件ID', '段落ID', '次數', '理由', '狀態', '處理結果', '審核者', '審核時間']);
+  make(SHEETS.evalQs, ['題目ID', '來源', '類型', '題目', '應命中段落ID', '應命中文件ID', '應包含重點', '應轉介', '期望回應', '狀態', '專家確認', '建立時間']);
+  make(SHEETS.evalRuns, ['批次ID', '時間', '題目ID', '來源', '類型', '第幾次', '回應類型', '找對段落', '名次', '對題', '涵蓋重點', '依據', '安全', '安全說明', '格式問題', '回答模型', '評分模型', '評分說明', '回答摘要', '耗時ms', '專家抽查', '專家意見']);
   make(SHEETS.evalset, ['測試問題', '應命中文件ID', '備註', '結果', '名次', '最高分', '命中段落', '測試時間']);
   const def = ss.getSheetByName('工作表1') || ss.getSheetByName('Sheet1');
   if (def && def.getLastRow() === 0 && ss.getSheets().length > 1) ss.deleteSheet(def);

@@ -99,7 +99,7 @@ function adminCall(token, fn, args) {
     adminUploadDoc: adminUploadDoc, adminDocChunks: adminDocChunks, adminSetChunkType: adminSetChunkType, adminClassifyDoc: adminClassifyDoc,
     adminSetDocStatus: adminSetDocStatus, adminTestChat: adminTestChat, adminLogs: adminLogs, adminLogDetail: adminLogDetail,
     adminEvalList: adminEvalList, adminAddEval: adminAddEval, adminDeleteEval: adminDeleteEval, adminRunEval: adminRunEval,
-    adminRepairVectors: adminRepairVectors, adminModels: adminModels, adminPingModel: adminPingModel, adminImportKG: adminImportKG, adminKgGenStart: adminKgGenStart, adminKgGenBatch: adminKgGenBatch, adminKgGenFinish: adminKgGenFinish, adminGraphLoad: adminGraphLoad, adminMapDoc: adminMapDoc, adminCandAction: adminCandAction,
+    adminRepairVectors: adminRepairVectors, adminEvalBank: adminEvalBank, adminEvalSetQ: adminEvalSetQ, adminEvalGenPlan: adminEvalGenPlan, adminEvalGenBatch: adminEvalGenBatch, adminEvalGenSpecial: adminEvalGenSpecial, adminEvalImportLogs: adminEvalImportLogs, adminEvalAddExpert: adminEvalAddExpert, adminEvalRunStart: adminEvalRunStart, adminEvalRunOne: adminEvalRunOne, adminEvalRuns: adminEvalRuns, adminEvalSummary: adminEvalSummary, adminEvalReview: adminEvalReview, adminModels: adminModels, adminPingModel: adminPingModel, adminImportKG: adminImportKG, adminKgGenStart: adminKgGenStart, adminKgGenBatch: adminKgGenBatch, adminKgGenFinish: adminKgGenFinish, adminGraphLoad: adminGraphLoad, adminMapDoc: adminMapDoc, adminCandAction: adminCandAction,
   };
   if (!API[fn]) throw new Error('未知的操作');
   ADMIN_CTX_ = account;

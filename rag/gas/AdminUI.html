@@ -97,6 +97,7 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
   <button data-t="logs">對話紀錄</button>
   <button data-t="qa">問題統計</button>
   <button data-t="eval">命中率測試</button>
+  <button data-t="auto">自動評測</button>
   <button data-t="other">其他設定</button>
   <span class="me" id="me">載入中…</span>
   <button class="btn" id="logout" style="align-self:center;margin-left:8px;padding:4px 10px;font-size:12px" hidden>登出</button>
@@ -221,6 +222,40 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
     </div>
   </div>
   <p class="note">只統計更新後的新對話。點時間可以打開該回合的完整流程。</p>
+</section>
+
+<section id="auto">
+  <h3>自動評測 <span class="note">AI 出題 → 跑完整問答流程 → 另一個模型評分 → 專家抽查。分數適合看「改了之後進步或退步」，對外數字以專家題與真實提問為準。評測不寫入對話紀錄。</span></h3>
+  <div class="kpis" id="aBankK"></div>
+  <div class="grid2" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr)">
+    <div class="box">
+      <h4>1. 建立題庫</h4>
+      <p class="note" id="aModels"></p>
+      <div class="row"><label style="margin:0;font-weight:400">從已核可段落抽</label><input type="number" id="aGenN" value="60" min="6" max="600" style="width:80px"><span class="note">段出題</span><button class="btn pri" id="aGen">AI 出題</button></div>
+      <div class="row" style="margin-top:6px"><label style="margin:0;font-weight:400">特殊題</label><input type="number" id="aSpN" value="6" min="2" max="20" style="width:70px"><span class="note">題（應轉介、超出範圍、知識庫沒有）</span><button class="btn" id="aSp">AI 出特殊題</button></div>
+      <div class="row" style="margin-top:6px"><label style="margin:0;font-weight:400">從對話紀錄取真實提問</label><input type="number" id="aLogN" value="30" min="1" max="200" style="width:70px"><span class="note">題</span><button class="btn" id="aLog">匯入</button></div>
+      <label style="margin-top:8px">專家題 <span class="note">一行一題</span></label><textarea id="aExp" rows="3" placeholder="個案A 每次換活動就躲到桌子底下，要怎麼帶他回來？"></textarea>
+      <div class="row"><button class="btn" id="aExpAdd">加入專家題</button><span class="note" id="aBankStatus" style="white-space:pre-wrap"></span></div>
+    </div>
+    <div class="box">
+      <h4>2. 執行評測</h4>
+      <div class="row"><label style="margin:0;font-weight:400">題目來源</label><select id="aSrc" style="width:auto"><option value="">全部啟用的題目</option><option>AI 出題</option><option>真實提問</option><option>專家</option></select></div>
+      <div class="row" style="margin-top:6px"><label style="margin:0;font-weight:400">最多</label><input type="number" id="aMax" value="40" min="1" max="500" style="width:80px"><span class="note">題，每題跑</span><select id="aRep" style="width:auto"><option value="1">1 次</option><option value="2">2 次</option><option value="3" selected>3 次（可看一致性）</option></select></div>
+      <p class="note">每題約 15–30 秒，會呼叫回答流程與評分模型（產生費用）。執行期間不要關閉頁面；中斷後已完成的結果會保留。</p>
+      <div class="row"><button class="btn pri" id="aRun">開始評測</button><button class="btn" id="aStop" hidden>停止</button><span class="note" id="aRunStatus"></span></div>
+    </div>
+  </div>
+  <div class="box">
+    <div class="row" style="justify-content:space-between"><h4 style="margin:0">3. 結果</h4><div class="row"><select id="aRuns" style="width:auto;max-width:420px"></select><button class="btn" id="aRunsLoad" style="padding:3px 10px;font-size:12px">重新整理</button></div></div>
+    <div class="kpis" id="aK"></div>
+    <div id="aBreak" style="font-size:13px"></div>
+  </div>
+  <div class="box">
+    <h4>4. 專家抽查 <span class="note" id="aAgree"></span></h4>
+    <p class="note">系統挑出約一成隨機題目，加上分數低、安全未通過或評分失敗的題目。請判斷 AI 評審的評分是否合理：同意越多，AI 自動評分越可信。</p>
+    <div id="aReview" style="font-size:13px"></div>
+  </div>
+  <details class="box"><summary style="cursor:pointer;font-weight:600">題庫清單 <span class="note" id="aBankN"></span></summary><div class="list" style="max-height:420px;margin-top:8px"><table><thead><tr><th>來源</th><th>類型</th><th>題目</th><th>應包含重點／應轉介</th><th>啟用</th></tr></thead><tbody id="aBank"></tbody></table></div></details>
 </section>
 
 <section id="eval">
@@ -352,6 +387,7 @@ const SECTIONS = [
   { id: 'answer', title: '回答', keys: ['model_answer', 'temperature', 'answer_rules', 'knowledge_only', 'full_answer_rounds', 'continue_prompt', 'continue_options'] },
   { id: 'check', title: 'L5 檢查', toggle: 'enable_llm_check', keys: ['enable_relevance_check', 'model_check', 'check_prompt'] },
   { id: 'msgs', title: '固定訊息', keys: ['msg_no_knowledge', 'msg_check_failed', 'msg_ai_fallback', 'msg_out_of_scope'] },
+  { id: 'evalm', title: '自動評測', keys: ['model_eval_gen', 'model_eval_judge'] },
   { id: 'adv', title: '進階', keys: ['model_embed', 'embed_dim', 'chunk_size', 'chunk_overlap', 'enable_node_mapping', 'hourly_limit'], rest: true },
 ];
 const LABELS = {
@@ -363,6 +399,7 @@ const LABELS = {
   continue_prompt: '延續回覆方式', continue_options: '延續回覆選項',
   enable_llm_check: '啟用', enable_relevance_check: '回應度檢查', model_check: '檢查模型', check_prompt: '檢查標準',
   msg_no_knowledge: '查不到資料時', msg_check_failed: '檢查沒通過時', msg_ai_fallback: 'AI 補足時的提示', msg_out_of_scope: '超出服務範圍時',
+  model_eval_gen: '評測出題模型', model_eval_judge: '評測評分模型',
   model_embed: '向量模型', embed_dim: '向量維度', chunk_size: '切段長度（字）', chunk_overlap: '切段重疊（字）', enable_node_mapping: '上傳時標註知識圖譜', hourly_limit: '每個邀請碼每小時上限',
 };
 const isBoolV = v => v === true || v === false || String(v).toUpperCase() === 'TRUE' || String(v).toUpperCase() === 'FALSE';
@@ -439,10 +476,10 @@ function fillModelSelects() {
   if (!MODELS) return;
   $('settings').querySelectorAll('select[data-model]').forEach(sel => {
     const cur = sel.value, list = sel.dataset.model === 'embed' ? MODELS.embed : MODELS.gen;
-    const has = list.some(m => m.id === cur);
+    const has = list.some(m => m.id === cur) || (cur === '' && /^model_eval_/.test(D.settings[+sel.dataset.i].key));
     const groups = {};
     list.forEach(m => { const v = modelVer_(m.id); const g = m.provider === 'openai' ? 'OpenAI' : v >= 3 ? 'Gemini ' + Math.floor(v) + ' 系列' : v ? 'Gemini ' + v : '其他'; (groups[g] = groups[g] || []).push(m); });
-    sel.innerHTML = (has ? '' : `<option value="${esc(cur)}">${esc(cur)}（目前設定，清單中沒有）</option>`) +
+    sel.innerHTML = (/^model_eval_/.test(D.settings[+sel.dataset.i].key) ? `<option value="" ${cur === '' ? 'selected' : ''}>（留空：用檢查模型）</option>` : '') + (has ? '' : `<option value="${esc(cur)}">${esc(cur)}（目前設定，清單中沒有）</option>`) +
       Object.keys(groups).map(g => `<optgroup label="${esc(g)}">${groups[g].map(m => `<option value="${esc(m.id)}" ${m.id === cur ? 'selected' : ''}>${esc(mLabel(m))}${/preview|exp/.test(m.id) ? '（預覽）' : ''}</option>`).join('')}</optgroup>`).join('');
   });
 }
@@ -671,6 +708,98 @@ async function loadLogs() {
 $('lQ').onkeydown = e => { if (e.key === 'Enter') loadLogs(); };
 $('lLoad').onclick = loadLogs;
 document.querySelector('nav button[data-t="logs"]').addEventListener('click', () => { if (!logsLoaded) loadLogs(); });
+// ---------- 自動評測 ----------
+let AB = null, AStop = false;
+async function loadBank() {
+  try {
+    AB = await run('adminEvalBank');
+    const bs = AB.bySource, bt = AB.byType;
+    $('aBankK').innerHTML = k(AB.on, '啟用的題目', '共 ' + AB.total + ' 題') + k(bs['AI 出題'] || 0, 'AI 出題') + k(bs['真實提問'] || 0, '真實提問') + k(bs['專家'] || 0, '專家題') +
+      k((bt['應轉介'] || 0) + '／' + (bt['超出範圍'] || 0) + '／' + (bt['知識庫沒有'] || 0), '轉介／超出範圍／沒有');
+    $('aModels').innerHTML = `出題：<b>${esc(AB.genModel)}</b>｜評分：<b>${esc(AB.judgeModel)}</b>｜回答：<b>${esc(AB.answerModel)}</b>` +
+      (AB.judgeModel === AB.answerModel ? '<br><span class="bad">評分和回答用同一個模型，容易互相放水；建議到「機器人設定 → 自動評測」改用另一家的模型。</span>' : '') +
+      `<br>已核可文件 ${AB.docs} 份、${AB.chunks} 段。`;
+    $('aBankN').textContent = `（${AB.total} 題，顯示最新 500 題）`;
+    $('aBank').innerHTML = AB.qs.map(x => `<tr><td class="note">${esc(x.source)}</td><td class="note">${esc(x.type)}</td><td>${esc(x.q)}</td><td class="note">${esc(x.points || x.referral)}</td><td><input type="checkbox" data-q="${esc(x.id)}" ${x.on ? 'checked' : ''}></td></tr>`).join('') || '<tr><td colspan="5" class="note">還沒有題目</td></tr>';
+    $('aBank').querySelectorAll('[data-q]').forEach(c => c.onchange = async () => { try { await run('adminEvalSetQ', c.dataset.q, c.checked); } catch (e) { toast(e.message, 4000); c.checked = !c.checked; } });
+  } catch (e) { $('aBankK').innerHTML = `<p class="bad">${esc(e.message)}</p>`; }
+}
+const aBusy = (b, on) => { b.disabled = on; };
+$('aGen').onclick = async () => {
+  const b = $('aGen'); aBusy(b, true); let added = 0;
+  try {
+    const plan = await run('adminEvalGenPlan', +$('aGenN').value);
+    if (!plan.picked) throw new Error('沒有已核可的段落');
+    for (let i = 0; i < plan.batches; i++) {
+      $('aBankStatus').textContent = `出題中 ${i + 1}／${plan.batches}…（已出 ${added} 題）`;
+      try { const r = await run('adminEvalGenBatch', plan.ids.slice(i * 6, i * 6 + 6)); added += r.added; } catch (e) { }
+    }
+    $('aBankStatus').textContent = `完成：新增 ${added} 題`; loadBank();
+  } catch (e) { $('aBankStatus').textContent = '失敗：' + e.message; } finally { aBusy(b, false); }
+};
+$('aSp').onclick = async () => { const b = $('aSp'); aBusy(b, true); $('aBankStatus').textContent = '出題中…';
+  try { const r = await run('adminEvalGenSpecial', +$('aSpN').value); $('aBankStatus').textContent = `新增 ${r.added} 題特殊題`; loadBank(); } catch (e) { $('aBankStatus').textContent = '失敗：' + e.message; } finally { aBusy(b, false); } };
+$('aLog').onclick = async () => { const b = $('aLog'); aBusy(b, true);
+  try { const r = await run('adminEvalImportLogs', +$('aLogN').value); $('aBankStatus').textContent = `匯入 ${r.added} 題真實提問`; loadBank(); } catch (e) { $('aBankStatus').textContent = '失敗：' + e.message; } finally { aBusy(b, false); } };
+$('aExpAdd').onclick = async () => { const b = $('aExpAdd'); aBusy(b, true);
+  try { const r = await run('adminEvalAddExpert', $('aExp').value); $('aExp').value = ''; $('aBankStatus').textContent = `加入 ${r.added} 題專家題`; loadBank(); } catch (e) { $('aBankStatus').textContent = '失敗：' + e.message; } finally { aBusy(b, false); } };
+$('aStop').onclick = () => { AStop = true; $('aStop').disabled = true; };
+$('aRun').onclick = async () => {
+  const b = $('aRun'); aBusy(b, true); AStop = false; $('aStop').hidden = false; $('aStop').disabled = false;
+  try {
+    const st = await run('adminEvalRunStart', { source: $('aSrc').value, max: +$('aMax').value, repeats: +$('aRep').value });
+    if (!st.jobs.length) throw new Error('沒有可評測的題目');
+    let done = 0, fail = 0;
+    for (const j of st.jobs) {
+      if (AStop) break;
+      $('aRunStatus').textContent = `評測中 ${done + 1}／${st.jobs.length}（${st.questions} 題 × ${st.repeats} 次）${fail ? `，失敗 ${fail}` : ''}…`;
+      try { await run('adminEvalRunOne', st.run, j.q, j.k); } catch (e) { fail++; }
+      done++;
+    }
+    $('aRunStatus').textContent = (AStop ? '已停止：' : '完成：') + `${done} 筆` + (fail ? `，失敗 ${fail} 筆` : '');
+    await loadRuns(st.run);
+  } catch (e) { $('aRunStatus').textContent = '失敗：' + e.message; } finally { aBusy(b, false); $('aStop').hidden = true; }
+};
+async function loadRuns(select) {
+  try {
+    const rs = await run('adminEvalRuns');
+    $('aRuns').innerHTML = rs.map(r => `<option value="${esc(r.run)}">${esc(r.time)}｜${r.n} 筆｜回答 ${esc(r.model)}｜評分 ${esc(r.judge)}</option>`).join('') || '<option value="">還沒有評測結果</option>';
+    if (select) $('aRuns').value = select;
+    if ($('aRuns').value) loadSummary($('aRuns').value);
+  } catch (e) { toast(e.message, 4000); }
+}
+const P = v => v == null ? '—' : v + '%';
+const P1 = v => v == null ? '—' : Math.round(v * 100) + '%';
+async function loadSummary(runId) {
+  $('aK').innerHTML = '<p class="note">載入中…</p>';
+  try {
+    const S = await run('adminEvalSummary', runId); const a = S.all;
+    $('aK').innerHTML =
+      k(P(a.retrieval.hit), '1. 找對段落', `文件層級 ${P(a.retrieval.docHit)}｜MRR ${a.retrieval.mrr == null ? '—' : a.retrieval.mrr}｜${a.retrieval.n} 題有標準段落`) +
+      k(P(a.relevance.score), '2. 對題', `涵蓋重點 ${P1(a.relevance.coverage)}`) +
+      k(P1(a.grounded.score), '3. 依據', '策略能在引用段落找到的比例') +
+      k(P(a.safety.pass), '4. 安全', `未通過 ${a.safety.fail}｜注意 ${a.safety.warn}`, a.safety.fail ? 'bad' : '') +
+      k(a.consistency ? P(a.consistency.sameType) : P(a.format.issues == null ? null : Math.round((100 - a.format.issues) * 10) / 10), '5. 穩定',
+        (a.consistency ? `多次回應類型一致｜對題分數差 ${a.consistency.relSpread == null ? '—' : a.consistency.relSpread}｜` : '') + `格式問題 ${P(a.format.issues)}${a.format.errors ? `｜執行失敗 ${a.format.errors}` : ''}`);
+    const tbl = (o, title) => `<b>${title}</b><div class="list" style="margin:4px 0 10px"><table><thead><tr><th></th><th class="num">筆數</th><th class="num">找對段落</th><th class="num">對題</th><th class="num">涵蓋</th><th class="num">依據</th><th class="num">安全</th></tr></thead><tbody>${Object.keys(o).map(x => { const v = o[x]; return `<tr><td>${esc(x)}</td><td class="num">${v.n}</td><td class="num">${P(v.retrieval.hit)}</td><td class="num">${P(v.relevance.score)}</td><td class="num">${P1(v.relevance.coverage)}</td><td class="num">${P1(v.grounded.score)}</td><td class="num">${P(v.safety.pass)}</td></tr>`; }).join('')}</tbody></table></div>`;
+    $('aBreak').innerHTML = `<p class="note">回答模型 ${esc(S.models.answer || '')}｜評分模型 ${esc(S.models.judge || '')}</p>` + tbl(S.byType, '依題目類型') + tbl(S.bySource, '依題目來源');
+    $('aAgree').textContent = S.agreement.reviewed ? `已抽查 ${S.agreement.reviewed} 題，同意 AI 評分 ${S.agreement.agree}%｜待抽查 ${S.agreement.pending}` : `待抽查 ${S.agreement.pending} 題`;
+    $('aReview').innerHTML = S.review.map(x => `<div class="cand" data-row="${x.row}">
+      <div class="row" style="justify-content:space-between"><b>${esc(x.q)}</b><span class="note">${esc(x.source)}｜${esc(x.type)}｜${esc(TN[x.resp] || x.resp)}</span></div>
+      <div class="note">找對段落：${esc(x.hit || '—')}｜對題：${x.rel == null ? '—' : x.rel + '/2'}｜涵蓋：${P1(x.cov)}｜依據：${P1(x.grd)}｜安全：<span class="${x.safety === '未通過' ? 'bad' : ''}">${esc(x.safety || '—')}</span>${x.safetyNote ? '（' + esc(x.safetyNote) + '）' : ''}</div>
+      ${x.note ? `<div class="note">評審說明：${esc(x.note)}</div>` : ''}<div class="q">${esc(x.answer)}</div>
+      <div class="row"><input type="text" data-c placeholder="意見（選填）" value="${esc(x.comment)}" style="flex:1;min-width:160px"><button class="btn ${x.status === '同意' ? 'pri' : ''}" data-s="同意">同意評分</button><button class="btn ${x.status === '不同意' ? 'pri' : ''}" data-s="不同意">不同意</button></div></div>`).join('') || '<p class="note">這次沒有需要抽查的題目</p>';
+    $('aReview').querySelectorAll('[data-s]').forEach(btn => btn.onclick = async () => {
+      const box = btn.closest('[data-row]');
+      try { await run('adminEvalReview', +box.dataset.row, btn.dataset.s, box.querySelector('[data-c]').value); box.querySelectorAll('[data-s]').forEach(x => x.classList.toggle('pri', x === btn)); toast('已記錄'); }
+      catch (e) { toast(e.message, 4000); }
+    });
+  } catch (e) { $('aK').innerHTML = `<p class="bad">${esc(e.message)}</p>`; }
+}
+$('aRuns').onchange = () => $('aRuns').value && loadSummary($('aRuns').value);
+$('aRunsLoad').onclick = () => loadRuns($('aRuns').value);
+document.querySelector('nav button[data-t="auto"]').addEventListener('click', () => { if (!AB) { loadBank(); loadRuns(); } });
+
 // ---------- 問題統計 ----------
 let Q = null;
 const cnt = (o, total, extra) => Object.keys(o).sort((a, b) => o[b] - o[a]).map(x => `<li>${esc(x)} <b>${o[x]}</b>${total ? ` <span class="note">${Math.round(o[x] / total * 100)}%</span>` : ''}${extra ? extra(x) : ''}</li>`).join('') || '<li class="note">沒有</li>';
