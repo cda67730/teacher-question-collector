@@ -172,13 +172,16 @@ function search_(qvec, rawText, concepts, k) { return searchDetail_(qvec, rawTex
 function rerankSelect_(focus, caseText, pool, C) {
   const topK = Number(C.top_k || 6), minAct = Number(C.quota_min_actionable == null || C.quota_min_actionable === '' ? 3 : C.quota_min_actionable);
   const maxPri = Number(C.quota_max_principle == null || C.quota_max_principle === '' ? 2 : C.quota_max_principle);
-  let scores = pool.map(() => null), used = false;
+  let scores = pool.map(() => null), used = false, why = '';
+  const rrOn = truthy_(C.enable_rerank == null || C.enable_rerank === '' ? true : C.enable_rerank);
+  if (!rrOn) why = '重排已關閉';
   if (pool.length && truthy_(C.enable_rerank == null || C.enable_rerank === '' ? true : C.enable_rerank)) {
     try {
       stabAt_('重排');
       const r = genJson_(C.model_rerank || C.model_check || C.model_triage, '你在替幼教老師的提問挑選參考資料，只輸出 JSON。\n' +
         '老師這次想要的（提問焦點）：' + focus + '\n老師的描述：' + String(caseText).slice(0, 1500) + '\n\n' +
         '為每段資料打分：3＝能直接回答焦點（有具體可用的做法）、2＝部分回答、1＝只是相關背景或一般原則、0＝無關。\n' +
+        '注意：焦點若指名特定對象或情況（例如某種障礙類別、年齡、場合），段落必須是在談這個對象或情況才能給 2 或 3；談的是別的對象，即使做法看起來可以套用，也只能給 1。\n' +
         '格式：{"scores":[3,1,…]}，順序與段落相同。\n\n' + pool.map((h, i) => '【' + (i + 1) + '】' + (h.type ? '（' + h.type + '）' : '') + h.text.slice(0, 600)).join('\n\n'),
         { temperature: 0, noThink: true });
       const arr = Array.isArray(r) ? r : (r.scores || []);
@@ -187,7 +190,8 @@ function rerankSelect_(focus, caseText, pool, C) {
       scores = pool.map((_, i) => { const v = Number(arr[i]); return arr[i] == null || isNaN(v) ? null : Math.max(0, Math.min(3, v)); });
       used = scores.some(v => v != null);          // 讀不出分數就退回向量順序
       if (!used) scores = pool.map(() => null);
-    } catch (e) { console.warn('重新排序失敗，改用向量順序', e); }
+      if (!used) why = '讀不出分數';
+    } catch (e) { why = '重排失敗：' + String(e.message || e).slice(0, 120); stabNote_('重排失敗', e.message); console.warn('重新排序失敗，改用向量順序', e); }
   }
   const items = pool.map((h, i) => ({ h: h, s: scores[i], i: i }));
   // 排序：重排分數高者優先，同分看向量分數；沒有重排分數時照向量順序
@@ -204,7 +208,7 @@ function rerankSelect_(focus, caseText, pool, C) {
   const direct = used ? pick.filter(x => x.s >= 2).length : pick.length;
   return {
     hits: hits, direct: direct, actionable: pick.filter(isAct).length,
-    trace: { used: used, model: C.model_rerank || C.model_check || C.model_triage, focus: focus, topK: topK, minAct: minAct, maxPri: maxPri,
+    trace: { used: used, why: why, model: C.model_rerank || C.model_check || C.model_triage, focus: focus, topK: topK, minAct: minAct, maxPri: maxPri,
       items: items.map(x => ({ id: x.h.id, title: x.h.title, page: x.h.page, type: x.h.type || '', vec: x.h.score, rerank: x.s,
         ref: (hits.find(h => h.id === x.h.id) || {}).ref || '', text: x.h.text.slice(0, 200) })) },
   };

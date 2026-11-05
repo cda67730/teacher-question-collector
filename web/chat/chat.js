@@ -32,9 +32,9 @@
     const a = r.answer, src = {};
     (r.sources || []).forEach((s) => (src[s.ref] = s));
     const chips = (s) => (s.refs || []).filter((x) => src[x]).map((x) => `<button type="button" class="ref" data-ref="${esc(x)}">${esc(x)}</button>`).join("") +
-      (r.type === "ai_fallback" && !(s.refs || []).some((x) => src[x]) ? `<span class="ai-tag">AI 補充</span>` : "");
+      ((r.type === "ai_fallback" || (a && a.notice)) && !(s.refs || []).some((x) => src[x]) ? `<span class="ai-tag">AI 補充</span>` : "");
     if (r.type === "continue") {
-      let c = `<p>${R(a.reply)}</p>`;
+      let c = (a.notice ? `<div class="notice">${esc(a.notice)}</div>` : "") + `<p>${R(a.reply)}</p>`;
       if ((a.strategies || []).length) c += `<h3>可以再試試</h3><ol>${a.strategies.map((s) => `<li><b>${R(s.title)}</b>：${R(s.how)}${chips(s)}</li>`).join("")}</ol>`;
       if (a.parent_message) c += `<h3>給家長的訊息草稿</h3><div class="pm">${R(a.parent_message)}</div><div class="actions"><button type="button" data-copy="1">複製訊息</button></div>`;
       if ((a.observe || []).length) c += `<h3>觀察重點</h3><ul>${a.observe.map((o) => `<li>${R(o)}</li>`).join("")}</ul>`;

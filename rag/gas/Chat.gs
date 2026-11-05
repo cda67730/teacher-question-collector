@@ -150,9 +150,9 @@ function runChat_(req, opts) {
   if (sd.hits.length) T('重新排序與配額', rr.trace, 'rerank');
   // 知識不足：knowledge_only 開＝保守回答；關＝由 AI 協助補足（照樣過全部檢查，並標示）
   let fallback = false;
+  const kOnly = truthy_(C.knowledge_only == null || C.knowledge_only === '' ? true : C.knowledge_only);
   if (mode === 'full' && (!hits.length || !rr.direct)) {
     const why = hits.length ? '沒有能直接回答焦點的段落（只有背景或原則）' : '沒有可用知識';
-    const kOnly = truthy_(C.knowledge_only == null || C.knowledge_only === '' ? true : C.knowledge_only);
     quality.gap = { kind: hits.length ? '只有背景或原則' : '沒有可用知識', outcome: kOnly ? '保守回答' : 'AI 補足', focus: focus, topics: tri.topics || [], top: metrics.top };
     if (kOnly) {
       T('P10 降級', why + ' → 保守回答，記為知識缺口');
@@ -165,11 +165,20 @@ function runChat_(req, opts) {
   // 5. P07 組裝 + A1 生成，最多重寫一次
   const refWho = ref ? ((refTable[ref.category] || {}).who || '') : '';
   const range = mode === 'full' ? [2, 3] : [0, 2];
-  let ans, chk, rewritten = false;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  let ans, chk, rewritten = false, maxAttempts = 2, fbNote = null;
+  // 生成或檢查時才發現知識不足（檢索分數高但談的是別的對象）：不要逼模型硬寫，改走知識不足的處理
+  const gapFound = (kind, detail, attempt) => {
+    quality.gap = { kind: kind, outcome: kOnly ? '保守回答' : 'AI 補足', focus: focus, topics: tri.topics || [], top: metrics.top, detail: String(detail || '').slice(0, 160) };
+    if (kOnly) { T('P10 降級', kind + '（' + detail + '）→ 保守回答，記為知識缺口'); return 'stop'; }
+    T('P04 狀態機', kind + '（' + detail + '）→ 改由 AI 協助補足並標示，記為知識缺口');
+    fallback = true; rewritten = true; maxAttempts = Math.max(maxAttempts, attempt + 2); fbNote = null;
+    return 'retry';
+  };
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const fb = fbNote; fbNote = null;
     const prompt = mode === 'full'
-      ? assemble_(sysPrompt, skillText, tri, caseText, hits, ctxHistory, ref, refWho, attempt ? chk.reasons : null, focus, fallback)
-      : assembleContinue_(sysPrompt, skillText, tri, prevTeacher, d.text, hits, ctxHistory, ref, refWho, intent, attempt ? chk.reasons : null, focus);
+      ? assemble_(sysPrompt, skillText, tri, caseText, hits, ctxHistory, ref, refWho, fb, focus, fallback)
+      : assembleContinue_(sysPrompt, skillText, tri, prevTeacher, d.text, hits, ctxHistory, ref, refWho, intent, fb, focus, fallback);
     if (attempt === 0) T('P07 Prompt 組裝', { summary: (mode === 'full' ? '完整回答' : '延續回覆') + '｜固定 system prompt ' + sysPrompt.length + ' 字｜Skill ' + skillText.length + ' 字｜知識 ' + hits.length + ' 段｜歷史 ' + ctxHistory.length + ' 則｜共 ' + prompt.length + ' 字', prompt: prompt }, 'prompt');
     stabAt_('A1');
     let raw;
@@ -179,16 +188,27 @@ function runChat_(req, opts) {
       if (!/JSON/.test(e.message)) throw e;
       chk = { pass: false, items: [{ name: '格式', pass: false, note: '回覆不是有效的 JSON' }], reasons: ['上一版回覆不是有效的 JSON，請只輸出 JSON'] };
       T(attempt ? 'A1 重寫' : 'A1 生成', '回覆不是有效的 JSON'); (stab.rewriteWhy = stab.rewriteWhy || []).push('格式');
-      rewritten = true; continue;
+      fbNote = chk.reasons; rewritten = true; continue;
     }
     validateAnswer_(raw, mode);
+    const kg = str_(raw.knowledge_gap).trim();
     ans = cleanAnswer_(raw);
-    T(attempt ? 'A1 重寫' : 'A1 生成', '策略 ' + (ans.strategies || []).length + ' 個');
+    T(attempt ? 'A1 重寫' : 'A1 生成', '策略 ' + (ans.strategies || []).length + ' 個' + (kg && kg !== 'null' ? '｜模型回報知識不足：' + kg : ''));
+    if (kg && kg !== 'null' && !fallback) {
+      chk = { pass: false, items: [], reasons: [] };
+      if (gapFound('回答時發現知識不足', kg, attempt) === 'stop') return finish({ type: 'conservative', message: conservativeMsg_(refTable), sources: [] });
+      continue;
+    }
     stabAt_('L5');
     chk = checks_(caseText, ans, hits, C, range, focus, fallback);
     T('檢查', chk.items, 'checks');
     if ((chk.l5 && chk.l5.length) || chk.relFail) quality.l5.push({ attempt: attempt, issues: chk.l5 || [], relevance: chk.relFail || null });
+    if (!chk.pass && chk.relFail && chk.relFail.cause === '知識不足' && !fallback) {
+      if (gapFound('檢查發現知識不足', chk.relFail.note || '知識沒有針對這個問題', attempt) === 'stop') return finish({ type: 'conservative', message: conservativeMsg_(refTable), sources: [] });
+      continue;
+    }
     if (chk.pass) break;
+    fbNote = chk.reasons;
     (stab.rewriteWhy = stab.rewriteWhy || []).push.apply(stab.rewriteWhy, chk.items.filter(x => !x.pass).map(x => x.name));
     rewritten = true;
   }
@@ -205,6 +225,7 @@ function runChat_(req, opts) {
   const referral = ref ? { category: ref.category, level: ref.level, who: refWho, contact: (refTable[ref.category] || {}).contact || '' } : null;
   if (mode === 'continue') {
     ans.options = (ans.options && ans.options.length ? ans.options : continueOptions_()).map(str_).filter(Boolean).slice(0, 4);
+    if (fallback) ans.notice = text_('msg_ai_fallback');
     return finish({ type: 'continue', answer: ans, sources: sources, referral: referral, checks: chk.items, rewritten: rewritten, answered: answered + 1 });
   }
   if (fallback) ans.notice = text_('msg_ai_fallback');
@@ -259,7 +280,7 @@ function continueOptions_() {
 }
 
 /** 延續回覆：已經給過完整建議，這次只回應新的內容或使用者要的那件事 */
-function assembleContinue_(sys, skillText, tri, prevTeacher, latest, hits, history, ref, refWho, intent, feedback, focus) {
+function assembleContinue_(sys, skillText, tri, prevTeacher, latest, hits, history, ref, refWho, intent, feedback, focus, fallback) {
   const forbiddenWords = forbidden_().filter(f => !f.regex).map(f => f.rule);
   const hist = history.map(h => (h.role === 'teacher' ? '老師：' : '助手：') + h.text).join('\n');
   const kn = hits.map(h => h.ref + '｜' + h.title + (h.page ? '（第' + h.page + '頁）' : '') + '\n' + h.text).join('\n\n');
@@ -268,12 +289,16 @@ function assembleContinue_(sys, skillText, tri, prevTeacher, latest, hits, histo
     '【2 主題 Skill】\n' + skillText,
     '【3 對話到目前為止】\n' + (hist || '（無）'),
     '【4 老師這次說的】（' + intent + '）\n' + latest + (focus ? '\n老師想要的：' + focus : ''),
-    kn ? '【5 檢索到的知識（只能引用這些，編號 K1…）】\n' + kn : '【5 檢索到的知識】這次沒有找到新的相關知識，不要給新的策略。',
+    fallback
+      ? '【5 知識庫內容不足】' + (kn ? '以下知識沒有直接針對這次的問題，只能當背景引用（編號 K1…）：\n' + kn + '\n' : '') +
+        '這次可以用一般實務知識補足：只提供低風險、日常可做的做法；不得推測診斷；來自一般知識的策略 refs 填空陣列；最後建議把狀況整理給專業人員確認。'
+      : kn ? '【5 檢索到的知識（只能引用這些，編號 K1…）】\n' + kn : '【5 檢索到的知識】這次沒有找到新的相關知識，不要給新的策略。',
     '【延續回覆的做法】\n' + text_('continue_prompt') + '\n可提供的下一步選項（挑 2–4 個最適合的，可改寫成符合情境的說法）：\n' + continueOptions_().map(o => '- ' + o).join('\n'),
     feedback ? '【重寫指示】上一版沒有通過檢查：' + feedback.join('；') + '。請修正後重寫。' : '',
     '輸出格式（只輸出 JSON，沒有內容的欄位填 null 或空陣列）：{"reply":"直接回應老師這次說的話","strategies":[{"title":"","how":"","refs":["K1"]}],"parent_message":null,"observe":[],"referral":' +
-      (ref ? '"依「' + ref.level + '」簡短說明該找誰（可找：' + refWho + '）"' : 'null') + ',"options":["下一步選項"]}\n' +
-      '規則：strategies 0–2 個，只放之前沒給過的新做法，每個都要有 refs；不要重複之前回答過的內容；不得推測診斷；保留「幼兒A」等代稱；refs 編號不要寫進文字裡。' +
+      (ref ? '"依「' + ref.level + '」簡短說明該找誰（可找：' + refWho + '）"' : 'null') + ',"options":["下一步選項"],"knowledge_gap":null}\n' +
+      (fallback ? '' : '若這次的問題換了對象或主題，而上面的知識沒有在談它，不要硬套：knowledge_gap 填一句話說明缺少什麼；知識有涵蓋時為 null。\n') +
+      '規則：strategies 0–2 個，只放之前沒給過的新做法，' + (fallback ? '有引用知識才填 refs；' : '每個都要有 refs；') + '不要重複之前回答過的內容；不得推測診斷；保留「幼兒A」等代稱；refs 編號不要寫進文字裡。' +
       (forbiddenWords.length ? '不得出現這些詞：' + forbiddenWords.join('、') + '。' : ''),
   ].filter(Boolean).join('\n\n');
 }
@@ -293,8 +318,9 @@ function assemble_(sys, skillText, tri, caseText, hits, history, ref, refWho, fe
       : '【4 檢索到的知識（只能引用這些，編號 K1…）】\n' + kn,
     hist ? '【5 對話歷史】\n' + hist : '',
     feedback ? '【重寫指示】上一版沒有通過檢查：' + feedback.join('；') + '。請修正後重寫。' : '',
-    '輸出格式（只輸出 JSON）：{"empathy":"先回應老師感受的一兩句","understanding":"看見與理解：把行為轉成可觀察事件，推想背後的需要（兩三句）","strategies":[{"title":"策略名稱","how":"具體怎麼做（一兩句）","refs":["K1"]}],"parent_message":"若牽涉家長，給家長的訊息草稿，否則 null","observe":["接下來的觀察重點"],"teacher_care":"若老師提到壓力，一兩句自我照顧建議，否則 null","referral":' +
+    '輸出格式（只輸出 JSON）：{"empathy":"先回應老師感受的一兩句","understanding":"看見與理解：把行為轉成可觀察事件，推想背後的需要（兩三句）","strategies":[{"title":"策略名稱","how":"具體怎麼做（一兩句）","refs":["K1"]}],"parent_message":"若牽涉家長，給家長的訊息草稿，否則 null","observe":["接下來的觀察重點"],"teacher_care":"若老師提到壓力，一兩句自我照顧建議，否則 null","knowledge_gap":null,"referral":' +
       (ref ? '"依「' + ref.level + '」說明為什麼需要、該找誰（可找：' + refWho + '）"' : 'null') + '}\n' +
+      (fallback ? '' : '若上面的知識沒有在談這個問題的對象或情況（例如問的是某種障礙、知識談的是另一種），不要硬套：knowledge_gap 填一句話說明缺少什麼，strategies 給空陣列；知識有涵蓋時 knowledge_gap 為 null。\n') +
       '規則：' + (fallback ? 'strategies 2–3 個；引用背景知識時 refs 只能用上面提供的 K 編號，來自一般知識時 refs 為空陣列；不得推測診斷或使用標籤化用語；保留「幼兒A」等代稱。' : text_('answer_rules')) +
       (forbiddenWords.length ? '回答中不得出現這些詞（即使是否定句也不要寫）：' + forbiddenWords.join('、') + '。' : ''),
   ].filter(Boolean).join('\n\n');
@@ -323,9 +349,10 @@ function checks_(caseText, ans, hits, C, range, focus, fallback) {
       const l5 = genJson_(C.model_check, '你是學前融合教育 AI 回答的審查器，只輸出 JSON。\n' +
         (doL5 ? text_('check_prompt') + '\n每個問題的 severe：符合上面「嚴重」的定義為 true，其他為 false。\n' : '') +
         (doL5 && fallback ? '這次知識庫內容不足，refs 為空的策略來自一般實務知識：「依據」改為檢查是否屬於低風險、班級日常可做的做法，且沒有判斷行為功能、介入層級或推測診斷；越界或可能造成傷害才算嚴重。\n' : '') +
-        (doRel ? '另外判斷回應度：回答是否直接回應「老師想要的」，策略是否具體到這個孩子與情境（不是只有一般原則）。addressed 為 true／false，note 說明缺了什麼。\n' : '') +
+        (doRel ? '另外判斷回應度：回答是否直接回應「老師想要的」，策略是否具體到這個孩子與情境（不是只有一般原則）。addressed 為 true／false，note 說明缺了什麼；' +
+          'addressed 為 false 時，cause 填「知識不足」（提供的知識沒有在談這個問題的對象或情況，重寫也無法改善）或「偏題」（知識有涵蓋，但回答沒用好）。\n' : '') +
         '格式：{' + (doL5 ? '"issues":[{"type":"依據|轉介|語氣","severe":false,"note":"一句話說明問題"}]' : '') + (doL5 && doRel ? ',' : '') +
-        (doRel ? '"relevance":{"addressed":true,"note":""}' : '') + '}' + (doL5 ? '，沒有問題時 issues 為空陣列' : '') + '\n\n' +
+        (doRel ? '"relevance":{"addressed":true,"cause":null,"note":""}' : '') + '}' + (doL5 ? '，沒有問題時 issues 為空陣列' : '') + '\n\n' +
         (doRel ? '老師想要的：' + focus + '\n\n' : '') + '老師描述：\n' + caseText + '\n\n知識：\n' + kn + '\n\n回答：\n' + s, { temperature: 0, noThink: true });
       if (doL5 && !Array.isArray(l5.issues)) stabNote_(l5.issues == null ? '缺欄位' : '型別錯誤', 'issues');
       if (doL5 && Array.isArray(l5.issues) && l5.issues.some(x => typeof x === 'string')) stabNote_('型別錯誤', 'issues 項目是文字不是物件');
@@ -345,7 +372,7 @@ function checks_(caseText, ans, hits, C, range, focus, fallback) {
       if (doRel) {
         const rel = l5.relevance || {};
         const ok2 = rel.addressed !== false;
-        if (!ok2) relFail = { focus: focus, note: str_(rel.note).slice(0, 160) };
+        if (!ok2) relFail = { focus: focus, note: str_(rel.note).slice(0, 160), cause: rel.cause === '知識不足' ? '知識不足' : '偏題' };
         items.push({ name: '回應度', pass: ok2, note: ok2 ? '有直接回應：' + focus : '【嚴重】沒有回應到「' + focus + '」' + (rel.note ? '：' + str_(rel.note) : '') });
         if (!ok2) reasons.push('沒有直接回應老師想要的「' + focus + '」' + (rel.note ? '（' + str_(rel.note) + '）' : '') + '，請先直接回應這一點，策略要具體');
       }

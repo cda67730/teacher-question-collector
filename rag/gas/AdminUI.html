@@ -616,7 +616,7 @@ function renderReply(r) {
   if (r.type === 'followup') return esc(restore(r.empathy)) + '\n' + r.questions.map((q, i) => (i + 1) + '. ' + esc(restore(q))).join('\n');
   if (r.type === 'referral') { const f = r.referral; return `<b>需要馬上找專人（${esc(f.category)}・${esc(f.level)}）</b>\n${esc(restore(f.reason))}\n該找誰：${esc(f.who)} ${esc(f.contact)}\n現在要做：${esc(f.now)}`; }
   if (r.type === 'continue') {
-    const a = r.answer; let h = esc(restore(a.reply));
+    const a = r.answer; let h = (a.notice ? '<b style="color:var(--warn)">' + esc(a.notice) + '</b>\n' : '') + esc(restore(a.reply));
     if ((a.strategies || []).length) h += '\n\n<b>可以再試試</b>\n' + a.strategies.map((s, i) => `${i + 1}. ${esc(restore(s.title))}：${esc(restore(s.how))} [${(s.refs || []).join(',')}]`).join('\n');
     if (a.parent_message) h += '\n\n<b>給家長的訊息草稿</b>\n' + esc(restore(a.parent_message));
     if ((a.observe || []).length) h += '\n\n<b>觀察重點</b>\n' + a.observe.map(o => '・' + esc(restore(o))).join('\n');
