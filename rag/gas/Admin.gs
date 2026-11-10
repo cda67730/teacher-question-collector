@@ -99,7 +99,7 @@ function adminCall(token, fn, args) {
     adminUploadDoc: adminUploadDoc, adminDocChunks: adminDocChunks, adminSetChunkType: adminSetChunkType, adminClassifyDoc: adminClassifyDoc,
     adminSetDocStatus: adminSetDocStatus, adminTestChat: adminTestChat, adminLogs: adminLogs, adminLogDetail: adminLogDetail,
     adminEvalList: adminEvalList, adminAddEval: adminAddEval, adminDeleteEval: adminDeleteEval, adminRunEval: adminRunEval,
-    adminRepairVectors: adminRepairVectors, adminEvalBank: adminEvalBank, adminEvalSetQ: adminEvalSetQ, adminEvalGenPlan: adminEvalGenPlan, adminEvalGenBatch: adminEvalGenBatch, adminEvalGenSpecial: adminEvalGenSpecial, adminEvalImportLogs: adminEvalImportLogs, adminEvalAddExpert: adminEvalAddExpert, adminEvalRunStart: adminEvalRunStart, adminEvalRunOne: adminEvalRunOne, adminEvalRuns: adminEvalRuns, adminEvalSummary: adminEvalSummary, adminEvalReview: adminEvalReview, adminModels: adminModels, adminPingModel: adminPingModel, adminImportKG: adminImportKG, adminKgGenStart: adminKgGenStart, adminKgGenBatch: adminKgGenBatch, adminKgGenFinish: adminKgGenFinish, adminGraphLoad: adminGraphLoad, adminMapDoc: adminMapDoc, adminCandAction: adminCandAction,
+    adminRepairVectors: adminRepairVectors, adminFlowStats: adminFlowStats, adminEvalBank: adminEvalBank, adminEvalSetQ: adminEvalSetQ, adminEvalGenPlan: adminEvalGenPlan, adminEvalGenBatch: adminEvalGenBatch, adminEvalGenSpecial: adminEvalGenSpecial, adminEvalImportLogs: adminEvalImportLogs, adminEvalAddExpert: adminEvalAddExpert, adminEvalRunStart: adminEvalRunStart, adminEvalRunOne: adminEvalRunOne, adminEvalRuns: adminEvalRuns, adminEvalSummary: adminEvalSummary, adminEvalReview: adminEvalReview, adminModels: adminModels, adminPingModel: adminPingModel, adminImportKG: adminImportKG, adminKgGenStart: adminKgGenStart, adminKgGenBatch: adminKgGenBatch, adminKgGenFinish: adminKgGenFinish, adminGraphLoad: adminGraphLoad, adminMapDoc: adminMapDoc, adminCandAction: adminCandAction,
   };
   if (!API[fn]) throw new Error('未知的操作');
   ADMIN_CTX_ = account;
@@ -477,3 +477,58 @@ function adminPingModel(model, kind) {
 }
 
 function adminRepairVectors() { requireAdmin_(); return repairVectors_(); }
+
+// ---------- 流程控制台：依對話紀錄算出每一步的運作數據 ----------
+const FLOW_STEP_OF = [['P03', 'deid'], ['L4', 'triage'], ['P04', 'state'], ['P05', 'skill'], ['P06', 'retrieve'], ['重新排序', 'rerank'], ['P07', 'assemble'], ['A1', 'answer'], ['檢查', 'check'], ['P10', 'final']];
+function flowStepKey_(step) { const s = String(step || ''); const m = FLOW_STEP_OF.find(x => s.indexOf(x[0]) === 0); return m ? m[1] : ''; }
+function adminFlowStats(opts) {
+  requireAdmin_(); opts = opts || {};
+  const since = opts.days ? Date.now() - opts.days * 86400000 : 0;
+  let rs = rows_('logs').filter(r => {
+    const t = r['時間'] instanceof Date ? r['時間'].getTime() : 0;
+    if (since && t < since) return false;
+    if (!opts.includeTest && String(r['Session']).indexOf('admin-test') === 0) return false;
+    return true;
+  });
+  rs = rs.slice(-500);   // 最多看最近 500 回合，避免讀太久
+  const st = {}; const node = k => st[k] || (st[k] = { runs: 0, ms: 0 });
+  const out = { turns: rs.length, ms: 0, types: {}, retrieval: { n: 0, hit: 0, top: 0, topN: 0 }, rerank: { n: 0, used: 0, failed: 0, off: 0 },
+    gap: { n: 0, byKind: {}, byOutcome: {} }, answer: { n: 0, rewrite: 0, format: 0 }, check: { n: 0, l5: 0, severe: 0, conservative: 0 }, steps: st };
+  rs.forEach(r => {
+    const type = String(r['回應類型']); out.types[type] = (out.types[type] || 0) + 1;
+    out.ms += Number(r['耗時ms'] || 0);
+    const tr = jsonOr_(r['流程紀錄'], []); let prev = 0; const seen = {};
+    (Array.isArray(tr) ? tr : []).forEach(t => {
+      const k = flowStepKey_(t.step); const ms = Number(t.ms || 0); const d = Math.max(0, ms - prev); prev = ms;
+      if (!k) return; const o = node(k); o.ms += d; if (!seen[k]) { o.runs++; seen[k] = 1; }
+      if (k === 'rerank' && t.detail && typeof t.detail === 'object') {
+        out.rerank.n++; if (t.detail.used) out.rerank.used++; else if (/失敗/.test(t.detail.why || '')) out.rerank.failed++; else if (/關閉/.test(t.detail.why || '')) out.rerank.off++;
+      }
+    });
+    if (r['檢索段數'] !== '' && r['檢索段數'] != null) {
+      out.retrieval.n++; if (Number(r['檢索段數']) > 0) out.retrieval.hit++;
+      if (r['最高相似度'] !== '' && r['最高相似度'] != null) { out.retrieval.top += Number(r['最高相似度']); out.retrieval.topN++; }
+    }
+    const q = jsonOr_(r['品質問題'], null) || {};
+    if (q.gap) { out.gap.n++; out.gap.byKind[q.gap.kind] = (out.gap.byKind[q.gap.kind] || 0) + 1; out.gap.byOutcome[q.gap.outcome] = (out.gap.byOutcome[q.gap.outcome] || 0) + 1; }
+    if (seen.answer) {
+      out.answer.n++; if (String(r['是否重寫']) === '是') out.answer.rewrite++;
+      const s = jsonOr_(r['穩定度'], null) || {}; if ((s.ev || []).some(e => e.at === 'A1')) out.answer.format++;
+    }
+    if (seen.check) {
+      out.check.n++;
+      const l5 = q.l5 || []; if (l5.length) out.check.l5++;
+      if (l5.some(x => (x.issues || []).some(i => i.severe) || x.relevance)) out.check.severe++;
+      if (q.l5Final === '保守回答') out.check.conservative++;
+    }
+  });
+  Object.keys(st).forEach(k => st[k].avg = st[k].runs ? Math.round(st[k].ms / st[k].runs) : null);
+  out.avgMs = rs.length ? Math.round(out.ms / rs.length) : null;
+  out.skills = rows_('skills').filter(r => truthy_(r['啟用'])).length;
+  out.skillsAlways = rows_('skills').filter(r => truthy_(r['啟用']) && truthy_(r['一律載入'])).length;
+  out.chunks = rows_('chunks').filter(r => String(r['狀態']) === '已核可').length;
+  out.synonyms = Math.max(0, sh_('synonyms').getLastRow() - 1);
+  out.forbidden = Math.max(0, sh_('forbidden').getLastRow() - 1);
+  out.referral = Math.max(0, sh_('referral').getLastRow() - 1);
+  return out;
+}
