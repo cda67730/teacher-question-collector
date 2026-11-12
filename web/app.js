@@ -205,6 +205,8 @@
       const d = loadDraft();
       if (d && d.code === code && Array.isArray(d.items) && d.items.length) {
         state.items = d.items; state.idx = Math.min(d.idx || 0, d.items.length - 1);
+        // 題目文字以目前設定為準（草稿可能存著改版前的題目）
+        state.items.forEach((it) => { const q = C.QUESTIONS.find((x) => x.id === (it.base || it.qid)); if (q && !it.extra) { it.question = q.text; it.hint = q.hint || ""; } });
       } else {
         state.items = C.QUESTIONS.map((q) => newItem(q)); state.idx = 0;
       }
