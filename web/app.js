@@ -10,7 +10,7 @@
   const state = { code: "", bg: null, items: [], idx: 0, returnToReview: false };
 
   const newItem = (q, extra) => ({
-    qid: q.id, question: q.text, hint: q.hint || "", extra: !!extra,
+    qid: q.id, base: q.base || q.id, more: !!q.more, question: q.text, hint: q.hint || "", extra: !!extra,
     answer: "", transcript: "", voice: false, skipped: false,
     followups: [], fuAsked: false, followupAnswer: "",
     child: q.child === true ? true : q.child === "ask" ? "ask" : false,   // 這題是否要填個案資料
@@ -226,10 +226,11 @@
   function renderSlots(it) {
     const show = !!it.child;
     $("slots").hidden = !show;
-    if (!show) return;
+    if (!show) { $("triedBox").hidden = true; return; }
     $("childAskWrap").hidden = it.child !== "ask";
     $("childAsk").checked = !!it.childOn;
     $("slotFields").hidden = !it.childOn;
+    $("triedBox").hidden = !it.childOn;
     const s = slotsOf(it);
     $("ageY").value = s.ageY; $("ageM").value = s.ageM;
     $("sits").querySelectorAll("input").forEach((x) => (x.checked = s.sits.indexOf(x.value) >= 0));
@@ -270,7 +271,7 @@
   $("sits").addEventListener("change", () => { keepSlots(); saveDraft(); });
   $("tried").addEventListener("change", () => { keepSlots(); saveDraft(); });
   $("notTried").addEventListener("change", () => { syncTried(); keepSlots(); saveDraft(); });
-  $("childAsk").addEventListener("change", () => { keepSlots(); $("slotFields").hidden = !cur().childOn; saveDraft(); });
+  $("childAsk").addEventListener("change", () => { keepSlots(); $("slotFields").hidden = $("triedBox").hidden = !cur().childOn; saveDraft(); });
 
   // 已經有內容時，按鈕改成「再錄一段接著說」
   function micLabel() {
@@ -282,10 +283,49 @@
   $("answer").addEventListener("input", micLabel);
   $("fu-answer").addEventListener("input", micLabel);
 
+  // ---------- 分類分頁與「＋ 繼續增加回答」 ----------
+  const baseOf = (it) => it.base || it.qid;
+  const qNo = (base) => C.QUESTIONS.findIndex((q) => q.id === base) + 1;
+  function itemLabel(it) {   // 第 1 題／第 1 題・第 2 個回答／加錄
+    if (it.extra) return "加錄的問題";
+    const group = state.items.filter((x) => baseOf(x) === baseOf(it));
+    const n = group.indexOf(it) + 1;
+    return `第 ${qNo(baseOf(it))} 題` + (group.length > 1 ? `・第 ${n} 個回答` : "");
+  }
+  function renderTabs() {
+    const now = baseOf(cur());
+    $("tabs").innerHTML = C.QUESTIONS.map((q) => {
+      const n = state.items.filter((x) => baseOf(x) === q.id && x.answer && !x.skipped).length;
+      return `<button type="button" role="tab" class="tab${q.id === now ? " on" : ""}" aria-selected="${q.id === now}" data-tab="${esc(q.id)}">${esc(q.tab || q.text)}${n ? ` <span class="tab-n">${n}</span>` : ""}</button>`;
+    }).join("");
+  }
+  $("tabs").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-tab]"); if (!b) return;
+    keep();
+    const i = state.items.findIndex((x) => baseOf(x) === b.dataset.tab);
+    if (i < 0 || i === state.idx) return;
+    state.idx = i; state.returnToReview = false; renderQ(); show("s-q");
+  });
+  $("b-more").addEventListener("click", () => {
+    keep();
+    const it = cur();
+    $("e-q").textContent = "";
+    if (!it.answer) return ($("e-q").textContent = "這個回答還是空的，先說或打一點內容，再按「＋ 繼續增加回答」。");
+    const base = baseOf(it);
+    let end = state.idx; while (end + 1 < state.items.length && baseOf(state.items[end + 1]) === base && !state.items[end + 1].extra) end++;
+    const n = state.items.filter((x) => baseOf(x) === base).length + 1;
+    const q = it.extra ? { id: it.qid + "-" + n, base, more: true, text: it.question, hint: it.hint, child: it.child }
+                       : Object.assign({}, C.QUESTIONS.find((x) => x.id === base), { id: base + "-" + n, base, more: true });
+    state.items.splice(end + 1, 0, newItem(q, it.extra));
+    state.idx = end + 1; saveDraft(); renderQ(); show("s-q");
+    $("answer").focus();
+  });
+
   function renderQ() {
     const it = cur();
     renderSlots(it);
-    $("q-num").textContent = it.extra ? "加錄的問題" : `第 ${state.idx + 1} 題`;
+    renderTabs();
+    $("q-num").textContent = itemLabel(it);
     $("q-text").textContent = it.question; $("q-hint").textContent = it.hint;
     $("answer").value = it.answer; $("fu-answer").value = it.followupAnswer;
     $("fu-list").innerHTML = it.followups.map((x) => `<li>${esc(x)}</li>`).join("");
@@ -293,7 +333,7 @@
     $("q-status").textContent = it.voice ? "已轉成文字，請檢查並修改不正確的地方。" : "";
     $("e-q").textContent = "";
     $("b-prev").hidden = state.returnToReview || state.idx === 0;
-    $("b-skip").textContent = it.extra ? "刪除這題" : "跳過";
+    $("b-skip").textContent = it.extra ? "刪除這題" : it.more ? "刪除這個回答" : "跳過";
     const last = state.idx === state.items.length - 1;
     $("b-next").textContent = state.returnToReview ? "回到確認頁" : last ? "看我的回答" : "下一題";
     micLabel();
@@ -330,7 +370,7 @@
     $("e-q").textContent = "";
     const miss = missingSlots(it);
     if (miss.length) { $("slots").scrollIntoView({ behavior: "smooth", block: "start" }); return ($("e-q").textContent = "請先填好孩子的基本狀況：" + miss.join("、")); }
-    if (!it.answer) return ($("e-q").textContent = it.extra ? "請錄音或打字，或按「刪除這題」。" : "請錄音或打字回答，或按「跳過」。");
+    if (!it.answer) return ($("e-q").textContent = it.extra ? "請錄音或打字，或按「刪除這題」。" : it.more ? "請錄音或打字，或按「刪除這個回答」。" : "請錄音或打字回答，或按「跳過」。");
     it.skipped = false;
     // 每題只追問一次；有需要才顯示，使用者可以補充也可以直接往下
     if (!it.fuAsked) {
@@ -359,6 +399,10 @@
       state.items.splice(state.idx, 1); state.idx = Math.max(0, state.idx - 1);
       state.returnToReview = false; saveDraft(); renderReview(); show("s-review"); return;
     }
+    if (it.more) {   // 多加的回答：刪掉，回到同一題的前一個回答
+      state.items.splice(state.idx, 1); state.idx = Math.max(0, state.idx - 1);
+      saveDraft(); renderQ(); show("s-q"); return;
+    }
     keep(); it.skipped = true; saveDraft(); goNext();
   });
   $("b-prev").addEventListener("click", () => { keep(); state.idx--; renderQ(); show("s-q"); });
@@ -371,10 +415,10 @@
       const fu = (it.child && it.childOn && !empty ? `<div class="rv-fu">${esc(slotText(it))}</div>` : "") +
         (it.followupAnswer ? `<div class="rv-fu">補充：${esc(it.followupAnswer)}</div>` : "");
       return `<div class="rv">
-        <div class="rv-head"><span class="rv-q">${it.extra ? "加錄" : "第 " + (i + 1) + " 題"}｜${esc(it.question)}</span><span class="badge">${badge}</span></div>
+        <div class="rv-head"><span class="rv-q">${itemLabel(it)}｜${esc(it.question)}</span><span class="badge">${badge}</span></div>
         <p class="rv-a ${empty ? "muted" : ""}">${empty ? "（沒有回答）" : esc(it.answer)}</p>${fu}
         <div class="rv-actions"><button type="button" class="ghost" data-edit="${i}">${empty ? "回答這題" : "修改"}</button>
-        ${it.extra ? `<button type="button" class="ghost" data-del="${i}">刪除</button>` : ""}</div>
+        ${it.extra || it.more ? `<button type="button" class="ghost" data-del="${i}">刪除</button>` : ""}</div>
       </div>`;
     }).join("");
     $("e-review").textContent = "";
@@ -413,7 +457,7 @@
           ageMonths: ageMonths(s), ageLabel: ageLabel(s), situations: s.sits.join("、"),
           tried: s.notTried ? "還沒試過" : s.tried, result: s.notTried ? "" : s.result, complete: missingSlots(it).length === 0 }; })() : null,
       };
-    }).filter((a) => !(a.skipped && /^ADD/.test(a.qid)));
+    }).filter((a) => !(a.skipped && (/^ADD/.test(a.qid) || /-\d+$/.test(a.qid))));
     $("b-submit").disabled = true; $("e-review").textContent = "送出中…";
     try {
       const r = await api("submit", { background: state.bg, answers });

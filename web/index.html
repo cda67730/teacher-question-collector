@@ -41,6 +41,7 @@
 
   <!-- 第 2 頁起：一題一頁 -->
   <section id="s-q" class="card" hidden>
+    <div class="tabs" id="tabs" role="tablist"></div>
     <p class="muted small" id="q-num"></p>
     <h2 id="q-text"></h2>
     <p class="muted small" id="q-hint"></p>
@@ -54,20 +55,24 @@
         <div class="age"><select id="ageY"><option value="">歲</option><option value="1">未滿 2 歲</option><option value="2">2 歲</option><option value="3">3 歲</option><option value="4">4 歲</option><option value="5">5 歲</option><option value="6">6 歲</option></select>
         <select id="ageM" aria-label="幾個月"><option value="">個月</option></select></div>
         <fieldset class="chips"><legend>通常在什麼時候發生？<span class="muted small">（可複選）</span></legend><div id="sits"></div></fieldset>
-        <label for="tried">已經試過哪些做法？</label>
-        <textarea id="tried" rows="2" placeholder="例如：先提醒、讓他到旁邊冷靜、和家長聊過…"></textarea>
-        <div class="row tight">
-          <label class="check"><input type="checkbox" id="notTried"> 還沒試過</label>
-          <span class="spacer"></span>
-          <label for="result" class="inline">結果</label><select id="result" class="auto"></select>
-        </div>
       </div>
     </div>
 
     <button class="mic" id="b-mic" type="button"><span aria-hidden="true">🎤</span> 用說的回答</button>
-    <label for="answer">你的回答 <span class="muted small">（錄音轉好的文字會放在這裡，可以直接修改，也可以打字）</span></label>
+    <label for="answer">你的回答 <span class="muted small">（可以按上面的麥克風用說的，轉好的文字會放在這裡，也可以直接打字）</span></label>
     <textarea id="answer" rows="7" placeholder="也可以直接在這裡打字…"></textarea>
     <p class="muted small" id="q-status" aria-live="polite"></p>
+
+    <!-- 個案題下半段：已經試過的做法 -->
+    <div id="triedBox" class="slots" hidden>
+      <label for="tried">已經試過哪些做法？</label>
+      <textarea id="tried" rows="2" placeholder="例如：先提醒、讓他到旁邊冷靜、和家長聊過…"></textarea>
+      <div class="row tight">
+        <label class="check"><input type="checkbox" id="notTried"> 還沒試過</label>
+        <span class="spacer"></span>
+        <label for="result" class="inline">結果</label><select id="result" class="auto"></select>
+      </div>
+    </div>
 
     <div id="fu" class="fu-box" hidden>
       <p class="small"><b>想再多了解一點：</b></p>
@@ -76,6 +81,8 @@
       <label for="fu-answer">補充回答</label>
       <textarea id="fu-answer" rows="4"></textarea>
     </div>
+
+    <button class="ghost add" id="b-more" type="button">＋ 繼續增加回答</button>
 
     <p class="err" id="e-q"></p>
     <div class="row">

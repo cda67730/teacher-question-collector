@@ -68,3 +68,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .row.tight{margin-top:0}
 label.inline{margin:0}
 select.auto{width:auto}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:-4px 0 4px;overflow-x:auto}
+.tab{background:none;border:0;border-bottom:3px solid transparent;border-radius:0;padding:8px 12px;font-size:15px;color:inherit;opacity:.65;cursor:pointer;white-space:nowrap;width:auto}
+.tab.on{border-bottom-color:var(--accent);opacity:1;font-weight:600}
+.tab-n{display:inline-block;min-width:18px;padding:0 5px;border-radius:999px;background:var(--accent-soft);font-size:12px;text-align:center}
